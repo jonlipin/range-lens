@@ -61,6 +61,16 @@ local AOE_RADIUS = {
 }
 local CONE = { ["Cone of Cold"] = true }
 
+-- Frost Nova's freeze lands 1 to 2 yards short of its damage on WoW Forever
+-- (seen in game, 2026-09-29), although the spell data gives both the same 10 yd
+-- radius. The icon is for the freeze, so its reach is this much shorter.
+local FREEZE_SHORTFALL = { ["Frost Nova"] = 2 }
+
+-- How far a self-centred spell does what the icon promises.
+local function AoeReach(name, radius)
+    return radius - (FREEZE_SHORTFALL[name] or 0)
+end
+
 -- Talents that widen a self-centred spell, best rank first: { talent spell ID, factor }.
 -- Arctic Reach (Frost): +10% / +20% radius for Frost Nova and Cone of Cold.
 local ARCTIC_REACH = { { 16758, 1.2 }, { 16757, 1.1 } }
@@ -301,8 +311,8 @@ local function ResolveSpells()
             if not spell.range then
                 local radius = AoeRadius(name, id)
                 if radius then
-                    spell.aoe = radius
-                    spell.range = tostring(radius)
+                    spell.aoe = AoeReach(name, radius)
+                    spell.range = tostring(spell.aoe)
                 end
             end
             resolved[#resolved + 1] = spell
@@ -792,7 +802,12 @@ local function ScanSpellBook()
         if ok and not Truthy(ranged, true) then
             local radius = AoeRadius(name, id)
             if not radius then return end
-            range = radius .. (CONE[name] and " yd cone" or " yd around you")
+            local reach = AoeReach(name, radius)
+            if reach < radius then
+                range = reach .. " yd freeze (" .. radius .. " yd damage)"
+            else
+                range = radius .. (CONE[name] and " yd cone" or " yd around you")
+            end
         else
             local _, _, _, minRange, maxRange = SpellInfo(id or name)
             range = RangeText(minRange, maxRange)

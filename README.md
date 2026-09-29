@@ -12,7 +12,7 @@ Made for WoW Forever (Interface 16001).
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want; icons appear in the order you tick them.
 - **Range numbers.** Each icon shows the spell's range in yards.
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
-- **10 yard spells too.** Frost Nova, Arcane Explosion, Cone of Cold, Blast Wave, Hellfire, Howl of Terror, Holy Nova and Intimidating Shout have no target range, so the game can't check them. Range Lens checks them at 10 yards instead, and knows that Arctic Reach widens Frost Nova and Cone of Cold.
+- **10 yard spells too.** Frost Nova, Arcane Explosion, Cone of Cold, Blast Wave, Hellfire, Howl of Terror, Holy Nova and Intimidating Shout have no target range, so the game can't check them. Range Lens checks them at 10 yards instead, and knows that Arctic Reach widens Frost Nova and Cone of Cold. Frost Nova's icon is for the freeze, which lands a little short of the damage, so it lights 2 yards closer.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
 - **Safe in combat.** It never reads values the game keeps hidden in combat, and it skips the distance checks the game refuses on friendly units in combat.
 

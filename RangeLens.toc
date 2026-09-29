@@ -2,7 +2,7 @@
 ## Title: Range Lens
 ## Notes: Spell range icons under enemy nameplates and on a target panel, in the Cooldown Manager's style, with range numbers, cooldowns and a live distance.
 ## Author: jonlipin
-## Version: 1.0.0
+## Version: 1.0.1
 ## SavedVariables: RangeLensDB
 ## SavedVariablesPerCharacter: RangeLensCharDB
 ## IconTexture: Interface\Icons\Ability_Hunter_SniperShot
