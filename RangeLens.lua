@@ -326,6 +326,10 @@ local function ResolveSpells()
             -- Query by name so the check follows whatever rank the character has.
             local spell = { query = name, spellID = id, icon = icon or QUESTION_ICON,
                 range = RangeText(minRange, maxRange) }
+            if not isSecret(minRange) and not isSecret(maxRange) and type(minRange) == "number"
+                and type(maxRange) == "number" and minRange > 0 and maxRange > minRange then
+                spell.minRange, spell.maxRange = minRange, maxRange
+            end
             if not spell.range then
                 local radius = AoeRadius(name, id)
                 if radius then
@@ -375,6 +379,9 @@ local OVERLAY_X, OVERLAY_Y = 9 / 50, 8 / 50
 -- cooldown swipe is black at 0.7; this one is darker, and red while out of range.
 local SWIPE_NORMAL = { 0, 0, 0, 0.85 }
 local SWIPE_OUT = { 0.6, 0.05, 0.05, 0.85 }
+-- Too close (inside a minimum range, such as Charge's 8 yards): orange instead of red.
+local CLOSE_R, CLOSE_G, CLOSE_B = 0.9, 0.5, 0.1
+local SWIPE_CLOSE = { 0.75, 0.38, 0.05, 0.85 }
 
 local function CreateIcon(parent)
     local f = CreateFrame("Frame", nil, parent)
@@ -472,24 +479,34 @@ local function SetIconSpell(icon, spell)
     icon.lit:SetTexture(spell.icon)
     icon.dim:SetAlpha(db.outAlpha)
     icon.oor:SetAlpha(OOR_ALPHA * db.outAlpha)
+    icon.dim:SetVertexColor(OUT_R, OUT_G, OUT_B)
+    icon.look = nil
     icon.range:SetText(db.showRange and spell.range or "")
     icon.spell = spell
 end
 
 -- The one place a range result is consumed.
-local function SetSwipeOut(icon, out)
-    if icon.swipeOut ~= out then
-        icon.swipeOut = out
-        pcall(icon.cd.SetSwipeColor, icon.cd, unpack(out and SWIPE_OUT or SWIPE_NORMAL))
+-- "in", "out" (too far, red) or "close" (inside a minimum range, orange).
+local SWIPE = { ["in"] = SWIPE_NORMAL, out = SWIPE_OUT, close = SWIPE_CLOSE }
+local function SetLook(icon, state)
+    if icon.look == state then return end
+    icon.look = state
+    if state == "close" then
+        icon.dim:SetVertexColor(CLOSE_R, CLOSE_G, CLOSE_B)
+        icon.oor:SetAlpha(0) -- the red shade would turn the orange back to red
+    else
+        icon.dim:SetVertexColor(OUT_R, OUT_G, OUT_B)
+        icon.oor:SetAlpha(OOR_ALPHA * db.outAlpha)
     end
+    pcall(icon.cd.SetSwipeColor, icon.cd, unpack(SWIPE[state]))
 end
 
-local function ApplyRange(icon, inRange)
+local function ApplyRange(icon, inRange, tooClose)
     if isSecret(inRange) then
         -- Can't look at it. Let the engine decide the lit layer's alpha.
         -- Default args are "fully visible if true, invisible if false".
         icon:Show()
-        SetSwipeOut(icon, false) -- the answer is hidden, so the plain swipe
+        SetLook(icon, "in") -- the answer is hidden, so the plain look
         if icon.lit.SetAlphaFromBoolean then
             icon.lit:SetAlphaFromBoolean(inRange)
         else
@@ -504,7 +521,7 @@ local function ApplyRange(icon, inRange)
     end
     icon:Show()
     icon.lit:SetAlpha(inRange and 1 or 0)
-    SetSwipeOut(icon, not inRange)
+    SetLook(icon, inRange and "in" or (tooClose and "close" or "out"))
 end
 
 -- Cooldown swipe from the game's own duration object: the numbers inside it
@@ -561,10 +578,22 @@ local function CheckSpell(spell, unit)
     return SpellInRange(spell.query, unit)
 end
 
+-- A spell with a minimum range that the game says can't reach: too close, or
+-- too far? A distance check that fits inside its maximum range (20 yards for
+-- Charge's 25) passing means the unit is within reach of the far end, so the
+-- game must be saying no because it is inside the minimum.
+local function TooClose(spell, unit)
+    if not spell.minRange then return false end
+    local c = CheckerFor(spell.maxRange - 1)
+    if not c or c.yards <= spell.minRange then return false end
+    return RunChecker(c, unit) == true
+end
+
 local function UpdateRow(row, unit)
     for i = 1, row.count or 0 do
         local icon = row.icons[i]
-        ApplyRange(icon, CheckSpell(icon.spell, unit))
+        local r = CheckSpell(icon.spell, unit)
+        ApplyRange(icon, r, r == false and TooClose(icon.spell, unit))
     end
 end
 
@@ -757,7 +786,7 @@ local function UpdatePanel()
             for i = 1, panel.row.count or 0 do
                 panel.row.icons[i]:Show()
                 panel.row.icons[i].lit:SetAlpha(1)
-                SetSwipeOut(panel.row.icons[i], false)
+                SetLook(panel.row.icons[i], "in")
             end
         end
         return
@@ -1453,7 +1482,9 @@ local function Slash(msg)
                 for _, spell in ipairs(resolved) do
                     local _, _, _, minR, maxR = SpellInfo(spell.query)
                     local reach = spell.aoe and (spell.aoe .. "yd around") or ((isSecret(maxR) and "?" or tostring(maxR)) .. "yd")
-                    parts[#parts + 1] = spell.query .. "[" .. reach .. "]=" .. Show(CheckSpell(spell, unit))
+                    local answer = CheckSpell(spell, unit)
+                    parts[#parts + 1] = spell.query .. "[" .. reach .. "]=" .. Show(answer)
+                        .. ((answer == false and TooClose(spell, unit)) and " (too close)" or "")
                 end
                 local d = {}
                 for _, c in ipairs(Checkers()) do

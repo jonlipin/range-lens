@@ -10,7 +10,8 @@ Made for WoW Forever (Interface 16001).
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
 - **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want; icons appear in the order you tick them.
-- **Range numbers.** Each icon shows the spell's range in yards.
+- **Range numbers.** Each icon shows the spell's range in yards, both ends for a spell with a minimum range (8-25 for Charge).
+- **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
 - **10 yard spells too.** Frost Nova, Arcane Explosion, Cone of Cold, Blast Wave, Hellfire, Howl of Terror, Holy Nova and Intimidating Shout have no target range, so the game can't check them. Range Lens checks them at 10 yards instead, and knows that Arctic Reach widens Frost Nova and Cone of Cold. Frost Nova's icon is for the freeze, which lands a little short of the damage, so it lights 1 yard closer.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.

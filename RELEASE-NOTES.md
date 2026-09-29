@@ -1,4 +1,3 @@
-## 1.0.3 - 2026-09-29
+## 1.1.0 - 2026-09-29
 
-- The cooldown sweep is dark now. It had been drawn pale; it is now black at 85% (the Cooldown Manager uses 70%), and it turns red while the spell is out of range.
-- Fixed: switching cooldowns off, or a spell with no cooldown data, called a function the game reserves for its own code. The sweep is now simply hidden instead.
+- Too close shows in orange. A spell with a minimum range, such as Charge (8 to 25 yards), now tells you which side you are on: the icon and its cooldown sweep turn orange while you are inside the minimum, and stay red when you are too far. `/rl debug` adds "(too close)" to such a spell.
