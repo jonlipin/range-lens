@@ -62,9 +62,9 @@ local AOE_RADIUS = {
 local CONE = { ["Cone of Cold"] = true }
 
 -- Frost Nova's freeze lands 1 to 2 yards short of its damage on WoW Forever
--- (seen in game, 2026-09-29), although the spell data gives both the same 10 yd
+-- (seen in game, 2026-09-29: it freezes past 8 yd but not at 10), although the spell data gives both the same 10 yd
 -- radius. The icon is for the freeze, so its reach is this much shorter.
-local FREEZE_SHORTFALL = { ["Frost Nova"] = 2 }
+local FREEZE_SHORTFALL = { ["Frost Nova"] = 1 }
 
 -- How far a self-centred spell does what the icon promises.
 local function AoeReach(name, radius)
@@ -88,8 +88,10 @@ end
 -- github.com/WeakAuras/LibRangeCheck-3.0), whose authors measured them in game:
 --  * C_Item.IsItemInRange with an item whose use range is known. The item does
 --    not have to be in your bags, but its data has to be loaded first.
---  * CheckInteractDistance: 3 = duel, 8 yd; 4 = follow, 28 yd (smaller for
---    Tauren and Undead characters).
+--  * CheckInteractDistance: 3 = duel, 8 yd; 2 = trade, 9 yd; 4 = follow, 28 yd
+--    (smaller for Tauren and Undead characters). LibRangeCheck measured trade
+--    but leaves it switched off, so it is checked against duel as it runs and
+--    dropped for the session if it ever says no inside duel range.
 -- Both are refused on friendly units while you are in combat, so those are skipped.
 ---------------------------------------------------------------------------
 
@@ -108,7 +110,8 @@ local HARM_ITEMS = {
 
 local itemFor = {}      -- [yards] = the first item of that range whose data is loaded
 local pendingItems = {} -- [itemID] = yards, while its data is being loaded
-local interactYards = { [3] = 8, [4] = 28 }
+local interactYards = { [3] = 8, [2] = 9, [4] = 28 }
+local tradeBroken = false   -- set when the trade check contradicts the duel check
 local interactBlocked = false -- set if the game ever refuses one of these checks
 local checkerCache          -- every available check, nearest first
 
@@ -149,8 +152,8 @@ end
 
 local function SetRaceDistances()
     local _, race = UnitRace("player")
-    if race == "Tauren" then interactYards = { [3] = 6, [4] = 25 }
-    elseif race == "Scourge" then interactYards = { [3] = 7, [4] = 27 } end
+    if race == "Tauren" then interactYards = { [3] = 6, [2] = 7, [4] = 25 }
+    elseif race == "Scourge" then interactYards = { [3] = 7, [2] = 8, [4] = 27 } end
     checkerCache = nil
 end
 
@@ -159,7 +162,11 @@ local function Checkers()
     local list = {}
     for yards, id in pairs(itemFor) do list[#list + 1] = { yards = yards, item = id } end
     if CheckInteractDistance and not interactBlocked then
-        for index, yards in pairs(interactYards) do list[#list + 1] = { yards = yards, interact = index } end
+        for index, yards in pairs(interactYards) do
+            if not (index == 2 and tradeBroken) then
+                list[#list + 1] = { yards = yards, interact = index }
+            end
+        end
     end
     table.sort(list, function(a, b) return a.yards < b.yards end)
     checkerCache = list
@@ -174,7 +181,18 @@ local function RunChecker(c, unit)
     else
         ok, r = pcall(CheckInteractDistance, unit, c.interact)
     end
-    if ok then return r end
+    if not ok then return nil end
+    if c.interact == 2 and r == false and not tradeBroken then
+        -- Out of trade range but inside duel range cannot be true: the trade
+        -- check does not work on this unit, so stop using it.
+        local okDuel, duel = pcall(CheckInteractDistance, unit, 3)
+        if okDuel and duel == true then
+            tradeBroken = true
+            checkerCache = nil
+            return true
+        end
+    end
+    return r
 end
 
 -- The check that reaches farthest without going past `radius`, so a lit icon
@@ -1426,7 +1444,8 @@ local function Slash(msg)
                     d[#d + 1] = c.yards .. (c.item and ("yd item " .. c.item) or "yd interact") .. " " .. Show(RunChecker(c, unit))
                 end
                 Print("  distance " .. tostring(DistanceText(unit)) .. " yd; checks: " .. (#d > 0 and table.concat(d, ", ") or "none")
-                    .. (interactBlocked and " (interact blocked this session)" or ""))
+                    .. (interactBlocked and " (interact blocked this session)" or "")
+                    .. (tradeBroken and " (9 yd trade check dropped: it said no inside 8 yd)" or ""))
                 local row = activePlates[unit]
                 Print(("%s %s: attackable %s, icons %s | %s"):format(unit, tostring(UnitName(unit)),
                     Show(UnitCanAttack("player", unit)),
