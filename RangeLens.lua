@@ -1,0 +1,1553 @@
+-- RangeLens
+-- Per-spell range indicators on enemy nameplates and on a movable target panel,
+-- drawn the way the game's Cooldown Manager draws its icons.
+--
+-- Secret-value safety: on clients with the 12.x addon restrictions (retail
+-- Midnight, WoW Forever), range results can come back as secret booleans in
+-- restricted contexts. Lua may not test, compare or branch on those. Every
+-- range result in this file goes through ApplyRange(), which either handles a
+-- plain boolean normally or hands a secret one straight to the engine through
+-- Region:SetAlphaFromBoolean without ever inspecting it. Cooldowns go to the
+-- engine as duration objects, so their numbers are never read either.
+
+local ADDON_NAME = ...
+
+---------------------------------------------------------------------------
+-- API shims
+---------------------------------------------------------------------------
+
+local isSecret = issecretvalue or function() return false end
+
+-- Plain boolean test that tolerates secrets: a secret yields `fallback`.
+local function Truthy(v, fallback)
+    if isSecret(v) then return fallback end
+    return v and true or false
+end
+
+local SpellInRange
+if C_Spell and C_Spell.IsSpellInRange then
+    SpellInRange = C_Spell.IsSpellInRange
+else
+    SpellInRange = function(spell, unit)
+        local r = IsSpellInRange(spell, unit)
+        if r == nil then return nil end
+        return r == 1
+    end
+end
+
+local function SpellInfo(spell)
+    if C_Spell and C_Spell.GetSpellInfo then
+        local info = C_Spell.GetSpellInfo(spell)
+        if info then return info.name, info.iconID, info.spellID, info.minRange, info.maxRange end
+        return nil
+    end
+    local name, _, icon, _, minRange, maxRange, id = GetSpellInfo(spell)
+    return name, icon, id, minRange, maxRange
+end
+
+-- "30", or "8-35" for a spell with a minimum range; nil when there is no range.
+-- Spells centred on you (or a cone in front of you) have no target range, so
+-- the game's range check answers nil for them. Their radius, in yards, from
+-- the Classic spell data; the descriptions of several don't say it.
+local AOE_RADIUS = {
+    ["Frost Nova"] = 10,
+    ["Arcane Explosion"] = 10,
+    ["Cone of Cold"] = 10,        -- a cone: facing is not checked
+    ["Blast Wave"] = 10,
+    ["Hellfire"] = 10,
+    ["Howl of Terror"] = 10,
+    ["Holy Nova"] = 10,
+    ["Intimidating Shout"] = 10,
+}
+local CONE = { ["Cone of Cold"] = true }
+
+-- Talents that widen a self-centred spell, best rank first: { talent spell ID, factor }.
+-- Arctic Reach (Frost): +10% / +20% radius for Frost Nova and Cone of Cold.
+local ARCTIC_REACH = { { 16758, 1.2 }, { 16757, 1.1 } }
+local AOE_TALENTS = { ["Frost Nova"] = ARCTIC_REACH, ["Cone of Cold"] = ARCTIC_REACH }
+
+local function KnowsSpell(id)
+    if IsPlayerSpell then return Truthy(IsPlayerSpell(id), false) end
+    if IsSpellKnown then return Truthy(IsSpellKnown(id), false) end
+    return false
+end
+
+---------------------------------------------------------------------------
+-- Distance checks for units without a spell range test. Both kinds and all
+-- the distances come from LibRangeCheck-3.0 by mitch0 and the WoWUIDev community (MIT licence,
+-- github.com/WeakAuras/LibRangeCheck-3.0), whose authors measured them in game:
+--  * C_Item.IsItemInRange with an item whose use range is known. The item does
+--    not have to be in your bags, but its data has to be loaded first.
+--  * CheckInteractDistance: 3 = duel, 8 yd; 4 = follow, 28 yd (smaller for
+--    Tauren and Undead characters).
+-- Both are refused on friendly units while you are in combat, so those are skipped.
+---------------------------------------------------------------------------
+
+-- Item IDs by use range in yards, LibRangeCheck-3.0's list for Classic Era and Forever.
+local HARM_ITEMS = {
+    [5] = { 8149, 15826, 16308, 17117, 22259, 22432, 206466, 208760, 208855, 209027, 209057, 213036, 221199, 225943 },
+    [10] = { 9606, 9618, 9619, 9620, 9621, 10699, 17626, 17689, 226472 },
+    [15] = { 4559 },
+    [20] = { 1191, 2012, 4388, 10645, 13892, 17757, 18209, 22048, 202251, 227936, 232344 },
+    [25] = { 13289 },
+    [30] = { 835, 1404, 1434, 1444, 1472, 1704, 1854, 1914, 1995, 2091, 3434, 3441, 4479, 4480, 4481, 4941, 5079, 5457, 6436, 7344, 7734, 9328, 9394, 10588, 10716, 10720, 11170, 11522, 11565, 12288, 12646, 12647, 13213, 13509, 13514, 17202, 17310, 20084, 20908, 21038, 21713, 22200, 22206, 22218, 220649, 228576, 233226 },
+    [35] = { 1258, 1399, 1402, 8688, 18904, 220568, 233216 },
+    [40] = { 4945, 8348, 191414, 208773, 208843, 209047 },
+    [45] = { 221316 },
+}
+
+local itemFor = {}      -- [yards] = the first item of that range whose data is loaded
+local pendingItems = {} -- [itemID] = yards, while its data is being loaded
+local interactYards = { [3] = 8, [4] = 28 }
+local interactBlocked = false -- set if the game ever refuses one of these checks
+local checkerCache          -- every available check, nearest first
+
+local function ItemReady(id)
+    if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(id) then return false end
+    return C_Item.GetItemInfo(id) ~= nil
+end
+
+local function LoadRangeItems()
+    if not (C_Item and C_Item.IsItemInRange and C_Item.GetItemInfo) then return end
+    for yards, list in pairs(HARM_ITEMS) do
+        if not itemFor[yards] then
+            for _, id in ipairs(list) do
+                if ItemReady(id) then
+                    itemFor[yards] = id
+                    checkerCache = nil
+                    break
+                end
+                if not pendingItems[id] then
+                    pendingItems[id] = yards
+                    if C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, id) end
+                end
+            end
+        end
+    end
+end
+
+-- GET_ITEM_INFO_RECEIVED
+local function OnItemLoaded(id, success)
+    local yards = pendingItems[id]
+    if not yards then return end
+    pendingItems[id] = nil
+    if success and not itemFor[yards] and ItemReady(id) then
+        itemFor[yards] = id
+        checkerCache = nil
+    end
+end
+
+local function SetRaceDistances()
+    local _, race = UnitRace("player")
+    if race == "Tauren" then interactYards = { [3] = 6, [4] = 25 }
+    elseif race == "Scourge" then interactYards = { [3] = 7, [4] = 27 } end
+    checkerCache = nil
+end
+
+local function Checkers()
+    if checkerCache then return checkerCache end
+    local list = {}
+    for yards, id in pairs(itemFor) do list[#list + 1] = { yards = yards, item = id } end
+    if CheckInteractDistance and not interactBlocked then
+        for index, yards in pairs(interactYards) do list[#list + 1] = { yards = yards, interact = index } end
+    end
+    table.sort(list, function(a, b) return a.yards < b.yards end)
+    checkerCache = list
+    return list
+end
+
+local function RunChecker(c, unit)
+    if InCombatLockdown() and not Truthy(UnitCanAttack("player", unit), false) then return nil end
+    local ok, r
+    if c.item then
+        ok, r = pcall(C_Item.IsItemInRange, c.item, unit)
+    else
+        ok, r = pcall(CheckInteractDistance, unit, c.interact)
+    end
+    if ok then return r end
+end
+
+-- The check that reaches farthest without going past `radius`, so a lit icon
+-- means the spell will reach.
+local function CheckerFor(radius)
+    local best
+    for _, c in ipairs(Checkers()) do
+        if c.yards <= radius then best = c end
+    end
+    return best
+end
+
+-- "8-10", "40+" or "0-5": between the farthest check that fails and the nearest that passes.
+local function DistanceText(unit)
+    local low = 0
+    for _, c in ipairs(Checkers()) do
+        local r = RunChecker(c, unit)
+        if r ~= nil and not isSecret(r) then
+            if r then return low .. "-" .. c.yards end
+            low = c.yards
+        end
+    end
+    if low > 0 then return low .. "+" end
+end
+
+-- Radius of a self-centred spell: the table first, then "within N yards" in its description.
+local function AoeRadius(name, id)
+    local r = name and AOE_RADIUS[name]
+    if r then
+        for _, t in ipairs(AOE_TALENTS[name] or {}) do
+            if KnowsSpell(t[1]) then return math.floor(r * t[2] + 0.5) end
+        end
+        return r
+    end
+    if C_Spell and C_Spell.GetSpellDescription and id then
+        local ok, text = pcall(C_Spell.GetSpellDescription, id)
+        if ok and type(text) == "string" and not isSecret(text) then
+            local n = text:match("within (%d+) yards") or text:match("(%d+) yard radius")
+            if n then return tonumber(n) end
+        end
+    end
+end
+
+local function RangeText(minRange, maxRange)
+    if isSecret(minRange) or isSecret(maxRange) then return nil end
+    if type(maxRange) ~= "number" or maxRange <= 0 then return nil end
+    local text = tostring(math.floor(maxRange + 0.5))
+    if type(minRange) == "number" and minRange > 0 then
+        text = math.floor(minRange + 0.5) .. "-" .. text
+    end
+    return text
+end
+
+local function SpellHasRange(spell)
+    if C_Spell and C_Spell.SpellHasRange then return C_Spell.SpellHasRange(spell) end
+    if _G.SpellHasRange then return _G.SpellHasRange(spell) end
+    return true
+end
+
+local function HasAtlas(atlas)
+    return C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) ~= nil
+end
+
+local QUESTION_ICON = 134400 -- INV_Misc_QuestionMark
+
+---------------------------------------------------------------------------
+-- Saved variables
+---------------------------------------------------------------------------
+
+local DEFAULTS = {
+    plates = true,          -- show rows on nameplates
+    enemyOnly = true,       -- only on units you can attack
+    panel = true,           -- show the target panel
+    locked = false,         -- target panel drag lock
+    cooldowns = true,       -- cooldown swipe (and countdown on the panel)
+    showRange = true,       -- spell range in yards on each icon
+    showDistance = true,    -- distance to the target above the panel
+    plateDistance = true,   -- distance to each unit beside its nameplate icons
+    minimap = true,         -- minimap button
+    minimapAngle = 200,     -- degrees around the minimap
+    plateIconSize = 18,
+    panelIconSize = 40,
+    plateOffsetY = -6,
+    plateOffsetX = 0,
+    outAlpha = 1,           -- opacity of the out-of-range look
+    interval = 0.1,         -- seconds between range checks
+    point = { "CENTER", "CENTER", 0, -190 },
+}
+
+-- Starting spells per class. Anything the character doesn't know is skipped
+-- automatically, so extra names here are harmless.
+local CLASS_DEFAULTS = {
+    MAGE    = { "Frostbolt", "Fire Blast", "Counterspell" },
+    WARLOCK = { "Shadow Bolt", "Corruption", "Fear" },
+    PRIEST  = { "Smite", "Shadow Word: Pain", "Mind Flay" },
+    DRUID   = { "Wrath", "Moonfire", "Entangling Roots" },
+    SHAMAN  = { "Lightning Bolt", "Earth Shock", "Purge" },
+    HUNTER  = { "Arcane Shot", "Concussive Shot", "Wing Clip" },
+    ROGUE   = { "Throw", "Kick", "Sinister Strike" },
+    WARRIOR = { "Charge", "Intercept", "Hamstring" },
+    PALADIN = { "Judgement", "Hammer of Justice", "Exorcism" },
+}
+
+local db, cdb
+
+local function CopyDefaults(src, dst)
+    for k, v in pairs(src) do
+        if dst[k] == nil then
+            if type(v) == "table" then
+                dst[k] = {}
+                CopyDefaults(v, dst[k])
+            else
+                dst[k] = v
+            end
+        end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Spell list (resolved from the character's saved entries)
+---------------------------------------------------------------------------
+
+-- resolved[i] = { query = <name passed to the range API>, spellID = id, icon = fileID, range = "30" }
+local resolved = {}
+
+local function ResolveSpells()
+    wipe(resolved)
+    for _, entry in ipairs(cdb.spells) do
+        local name, icon, id, minRange, maxRange = SpellInfo(entry)
+        if name then
+            -- Query by name so the check follows whatever rank the character has.
+            local spell = { query = name, spellID = id, icon = icon or QUESTION_ICON,
+                range = RangeText(minRange, maxRange) }
+            if not spell.range then
+                local radius = AoeRadius(name, id)
+                if radius then
+                    spell.aoe = radius
+                    spell.range = tostring(radius)
+                end
+            end
+            resolved[#resolved + 1] = spell
+        end
+    end
+end
+
+-- Index of a saved entry by list number, name or spell ID.
+local function FindEntry(query)
+    if type(query) == "number" and cdb.spells[query] and query <= #cdb.spells then
+        -- A small number is treated as a list index for remove.
+        return query
+    end
+    local wantName = SpellInfo(query) or query
+    for i, entry in ipairs(cdb.spells) do
+        local name = SpellInfo(entry) or entry
+        if entry == query or (type(name) == "string" and type(wantName) == "string"
+            and name:lower() == wantName:lower()) then
+            return i
+        end
+    end
+end
+
+---------------------------------------------------------------------------
+-- Icons, built like the Cooldown Manager's own
+-- (Blizzard_CooldownViewer/CooldownViewer.xml, CooldownViewerEssentialItemTemplate):
+-- the icon clipped by UI-HUD-CoolDownManager-Mask, UI-HUD-CoolDownManager-IconOverlay
+-- drawn 9 px past a 50 px icon on each side and 8 px above and below, and
+-- when out of range the icon tinted 0.64/0.15/0.15 under UI-CooldownManager-OORshadow
+-- at half strength.
+---------------------------------------------------------------------------
+
+local MASK_ATLAS = "UI-HUD-CoolDownManager-Mask"
+local OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
+local OOR_ATLAS = "UI-CooldownManager-OORshadow"
+local SWIPE_FILE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
+local EDGE_FILE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
+local OUT_R, OUT_G, OUT_B = 0.64, 0.15, 0.15
+local OOR_ALPHA = 0.5
+local OVERLAY_X, OVERLAY_Y = 9 / 50, 8 / 50
+
+local function CreateIcon(parent)
+    local f = CreateFrame("Frame", nil, parent)
+
+    local mask
+    if f.CreateMaskTexture and HasAtlas(MASK_ATLAS) then
+        mask = f:CreateMaskTexture()
+        mask:SetAtlas(MASK_ATLAS)
+        mask:SetAllPoints()
+    end
+
+    local function Layer(sublevel)
+        local t = f:CreateTexture(nil, "ARTWORK", nil, sublevel)
+        t:SetAllPoints()
+        if mask then
+            t:AddMaskTexture(mask)
+        else
+            t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
+        return t
+    end
+
+    -- Out-of-range look, always underneath.
+    f.dim = Layer(0)
+    f.dim:SetVertexColor(OUT_R, OUT_G, OUT_B)
+    f.oor = Layer(1)
+    if HasAtlas(OOR_ATLAS) then
+        f.oor:SetAtlas(OOR_ATLAS)
+    else
+        f.oor:SetColorTexture(0.5, 0, 0)
+    end
+
+    -- Normal icon on top: its alpha is the in-range signal.
+    f.lit = Layer(2)
+
+    if HasAtlas(OVERLAY_ATLAS) then
+        f.overlay = f:CreateTexture(nil, "OVERLAY")
+        f.overlay:SetAtlas(OVERLAY_ATLAS)
+    else
+        f.overlay = f:CreateTexture(nil, "BACKGROUND")
+        f.overlay:SetColorTexture(0, 0, 0, 0.85)
+        f.overlayPx = 1
+    end
+
+    f.cd = CreateFrame("Cooldown", nil, f)
+    f.cd:SetAllPoints()
+    pcall(f.cd.SetSwipeTexture, f.cd, SWIPE_FILE, 1, 1, 1, 1)
+    pcall(f.cd.SetEdgeTexture, f.cd, EDGE_FILE)
+    pcall(f.cd.SetDrawEdge, f.cd, false)
+    pcall(f.cd.SetHideCountdownNumbers, f.cd, true)
+
+    -- Spell range in yards, on a layer above the cooldown swipe.
+    f.textLayer = CreateFrame("Frame", nil, f)
+    f.textLayer:SetAllPoints()
+    f.textLayer:SetFrameLevel(f.cd:GetFrameLevel() + 2)
+    f.range = f.textLayer:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    f.range:SetPoint("BOTTOM", f, "BOTTOM", 0, 2)
+
+    return f
+end
+
+-- Countdown font by icon size; the manager uses the huge one on 50 px icons.
+local function CountdownFont(size)
+    if size >= 44 then return "GameFontHighlightHugeOutline" end
+    if size >= 30 then return "GameFontHighlightLargeOutline" end
+    return "GameFontHighlightOutline"
+end
+
+local function RangeFont(size)
+    if size >= 36 and _G.NumberFontNormalLarge then return "NumberFontNormalLarge" end
+    if size < 24 and _G.NumberFontNormalSmall then return "NumberFontNormalSmall" end
+    return "NumberFontNormal"
+end
+
+local function SizeIcon(icon, size, numbers)
+    icon:SetSize(size, size)
+    pcall(icon.range.SetFontObject, icon.range, RangeFont(size))
+    icon.range:ClearAllPoints()
+    icon.range:SetPoint("BOTTOM", icon, "BOTTOM", 0, size < 24 and 0 or 2)
+    local o = icon.overlay
+    o:ClearAllPoints()
+    local dx = icon.overlayPx or size * OVERLAY_X
+    local dy = icon.overlayPx or size * OVERLAY_Y
+    o:SetPoint("TOPLEFT", icon, "TOPLEFT", -dx, dy)
+    o:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", dx, -dy)
+    pcall(icon.cd.SetHideCountdownNumbers, icon.cd, not numbers)
+    if numbers and icon.cd.SetCountdownFont then
+        local font = CountdownFont(size)
+        if _G[font] then pcall(icon.cd.SetCountdownFont, icon.cd, font) end
+    end
+end
+
+local function SetIconSpell(icon, spell)
+    icon.dim:SetTexture(spell.icon)
+    icon.lit:SetTexture(spell.icon)
+    icon.dim:SetAlpha(db.outAlpha)
+    icon.oor:SetAlpha(OOR_ALPHA * db.outAlpha)
+    icon.range:SetText(db.showRange and spell.range or "")
+    icon.spell = spell
+end
+
+-- The one place a range result is consumed.
+local function ApplyRange(icon, inRange)
+    if isSecret(inRange) then
+        -- Can't look at it. Let the engine decide the lit layer's alpha.
+        -- Default args are "fully visible if true, invisible if false".
+        icon:Show()
+        if icon.lit.SetAlphaFromBoolean then
+            icon.lit:SetAlphaFromBoolean(inRange)
+        else
+            icon.lit:SetAlpha(0)
+        end
+        return
+    end
+    if inRange == nil then
+        -- Check not applicable (spell can't target this unit, unit not visible...)
+        icon:Hide()
+        return
+    end
+    icon:Show()
+    icon.lit:SetAlpha(inRange and 1 or 0)
+end
+
+-- Cooldown swipe from the game's own duration object: the numbers inside it
+-- may be secret in combat, and the engine is the only one that reads them.
+local function ApplyCooldown(icon)
+    local cd = icon.cd
+    local id = icon.spell and icon.spell.spellID
+    if not (db.cooldowns and id and C_Spell and C_Spell.GetSpellCooldownDuration
+        and cd.SetCooldownFromDurationObject) then
+        pcall(cd.Clear, cd)
+        return
+    end
+    local ok, duration = pcall(C_Spell.GetSpellCooldownDuration, id, true)
+    if not (ok and duration and pcall(cd.SetCooldownFromDurationObject, cd, duration, true)) then
+        pcall(cd.Clear, cd)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Icon rows (shared by nameplates and the panel)
+---------------------------------------------------------------------------
+
+local function LayoutRow(row, size, spacing, numbers)
+    local n = #resolved
+    row.icons = row.icons or {}
+    for i = 1, n do
+        local icon = row.icons[i]
+        if not icon then
+            icon = CreateIcon(row)
+            row.icons[i] = icon
+        end
+        SizeIcon(icon, size, numbers)
+        icon:ClearAllPoints()
+        icon:SetPoint("LEFT", row, "LEFT", (i - 1) * (size + spacing), 0)
+        SetIconSpell(icon, resolved[i])
+    end
+    for i = n + 1, #row.icons do
+        row.icons[i]:Hide()
+        row.icons[i].spell = nil
+    end
+    local width = n > 0 and (n * size + (n - 1) * spacing) or 1
+    row:SetSize(width, size)
+    row.count = n
+end
+
+-- In range? true/false, nil when the check doesn't apply, or a secret.
+local function CheckSpell(spell, unit)
+    if spell.aoe then
+        local c = CheckerFor(spell.aoe)
+        return c and RunChecker(c, unit)
+    end
+    return SpellInRange(spell.query, unit)
+end
+
+local function UpdateRow(row, unit)
+    for i = 1, row.count or 0 do
+        local icon = row.icons[i]
+        ApplyRange(icon, CheckSpell(icon.spell, unit))
+    end
+end
+
+local function UpdateRowCooldowns(row)
+    for i = 1, row.count or 0 do
+        ApplyCooldown(row.icons[i])
+    end
+end
+
+local function PanelSpacing(size)
+    return math.max(2, math.floor(size * 0.1 + 0.5))
+end
+
+---------------------------------------------------------------------------
+-- Nameplates
+---------------------------------------------------------------------------
+
+local plateRows = {}   -- [nameplate frame] = row
+local activePlates = {} -- [unit token] = row
+local plateUnits = {}  -- [unit token] = true for every nameplate currently shown
+
+local function PlateAnchor(plate)
+    local uf = plate.UnitFrame
+    if uf and not uf:IsForbidden() and uf.healthBar then
+        return uf.healthBar
+    end
+    return plate
+end
+
+local function WantsPlate(unit)
+    if not db.plates or #resolved == 0 then return false end
+    if Truthy(UnitIsUnit("player", unit), false) then return false end
+    if db.enemyOnly then
+        return Truthy(UnitCanAttack("player", unit), true)
+    end
+    return true
+end
+
+local function UpdatePlateDistance(row, unit)
+    local text = db.plateDistance and DistanceText(unit)
+    row.distance:SetText(text or "")
+end
+
+local function OnPlateAdded(unit)
+    local plate = C_NamePlate.GetNamePlateForUnit(unit)
+    if not plate or plate:IsForbidden() then return end
+
+    local row = plateRows[plate]
+    if not row then
+        row = CreateFrame("Frame", nil, plate)
+        row:SetFrameLevel(plate:GetFrameLevel() + 10)
+        row.distance = row:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        row.distance:SetPoint("LEFT", row, "RIGHT", 4, 0)
+        plateRows[plate] = row
+        LayoutRow(row, db.plateIconSize, 2, false)
+    end
+
+    if not WantsPlate(unit) then
+        row:Hide()
+        return
+    end
+
+    row:ClearAllPoints()
+    row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+    row.unit = unit
+    row:Show()
+    activePlates[unit] = row
+    UpdateRow(row, unit)
+    UpdatePlateDistance(row, unit)
+    UpdateRowCooldowns(row)
+end
+
+local function OnPlateRemoved(unit)
+    local row = activePlates[unit]
+    if row then
+        row:Hide()
+        row.unit = nil
+        activePlates[unit] = nil
+    end
+end
+
+local function RefreshAllPlates()
+    for unit, row in pairs(activePlates) do
+        row:Hide()
+        activePlates[unit] = nil
+    end
+    for _, row in pairs(plateRows) do
+        LayoutRow(row, db.plateIconSize, 2, false)
+    end
+    -- Nameplate frames carry no reliable unit field on Forever (the Blizzard
+    -- base mixin keeps it in plate.unitToken), so re-add from the tokens the
+    -- NAME_PLATE_UNIT_ADDED events gave us.
+    for unit in pairs(plateUnits) do
+        OnPlateAdded(unit)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Target panel
+---------------------------------------------------------------------------
+
+local panel = CreateFrame("Frame", "RangeLensPanel", UIParent)
+panel:SetClampedToScreen(true)
+panel:SetMovable(true)
+panel:RegisterForDrag("LeftButton")
+panel:Hide()
+
+panel.row = CreateFrame("Frame", nil, panel)
+panel.row:SetPoint("CENTER")
+
+panel.distance = panel:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+panel.distance:SetPoint("BOTTOM", panel, "TOP", 0, 0)
+
+-- While unlocked: a thin outline round the icons, brighter under the mouse,
+-- so it is clear the panel can be dragged. Hidden once locked.
+panel.outline = CreateFrame("Frame", nil, panel)
+panel.outline:SetAllPoints()
+panel.outline:SetFrameLevel(panel.row:GetFrameLevel() + 20)
+panel.outline.edges = {}
+for i, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+    local t = panel.outline:CreateTexture(nil, "OVERLAY")
+    t:SetColorTexture(0.3, 0.7, 1, 1)
+    if side == "TOP" or side == "BOTTOM" then
+        t:SetPoint(side .. "LEFT")
+        t:SetPoint(side .. "RIGHT")
+        t:SetHeight(1)
+    else
+        t:SetPoint("TOP" .. side)
+        t:SetPoint("BOTTOM" .. side)
+        t:SetWidth(1)
+    end
+    panel.outline.edges[i] = t
+end
+panel.outline:SetAlpha(0.55)
+panel.outline:Hide()
+
+panel:SetScript("OnEnter", function(self)
+    self.outline:SetAlpha(1)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText("Range Lens", 1, 1, 1)
+    GameTooltip:AddLine("Drag to move", 0.7, 0.7, 0.7)
+    GameTooltip:AddLine("Right-click: options", 0.7, 0.7, 0.7)
+    GameTooltip:AddLine("Lock it in the options or with the minimap button's right-click", 0.7, 0.7, 0.7, true)
+    GameTooltip:Show()
+end)
+panel:SetScript("OnLeave", function(self)
+    self.outline:SetAlpha(0.55)
+    GameTooltip:Hide()
+end)
+
+panel:SetScript("OnDragStart", function(self)
+    if not db.locked then self:StartMoving() end
+end)
+panel:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    local point, _, relPoint, x, y = self:GetPoint()
+    db.point = { point, relPoint, x, y }
+end)
+
+local function PlacePanel()
+    local p = db.point
+    panel:ClearAllPoints()
+    panel:SetPoint(p[1], UIParent, p[2], p[3], p[4])
+end
+
+local function LayoutPanel()
+    local size = db.panelIconSize
+    LayoutRow(panel.row, size, PanelSpacing(size), true)
+    local w, h = panel.row:GetSize()
+    -- Room for the icon overlay that reaches past each icon.
+    panel:SetSize(w + size * OVERLAY_X * 2 + 4, h + size * OVERLAY_Y * 2 + 4)
+    panel:EnableMouse(not db.locked)
+    panel.outline:SetShown(not db.locked)
+    UpdateRowCooldowns(panel.row)
+end
+
+local function UpdatePanel()
+    if not db.panel or #resolved == 0 then
+        panel:Hide()
+        return
+    end
+    local text = db.showDistance and Truthy(UnitExists("target"), false) and DistanceText("target")
+    panel.distance:SetText(text or "")
+    if not db.locked then
+        -- Unlocked: always visible so it can be positioned.
+        panel:Show()
+        if Truthy(UnitExists("target"), true) then
+            UpdateRow(panel.row, "target")
+        else
+            for i = 1, panel.row.count or 0 do
+                panel.row.icons[i]:Show()
+                panel.row.icons[i].lit:SetAlpha(1)
+            end
+        end
+        return
+    end
+    if Truthy(UnitExists("target"), true) and not Truthy(UnitIsDeadOrGhost("target"), false) then
+        panel:Show()
+        UpdateRow(panel.row, "target")
+    else
+        panel:Hide()
+    end
+end
+
+local function RefreshCooldowns()
+    UpdateRowCooldowns(panel.row)
+    for _, row in pairs(activePlates) do
+        UpdateRowCooldowns(row)
+    end
+end
+
+---------------------------------------------------------------------------
+-- Ticker
+---------------------------------------------------------------------------
+
+local ticker
+
+local tickCount = 0
+
+local function Tick()
+    tickCount = tickCount + 1
+    local distances = tickCount % 3 == 0
+    for unit, row in pairs(activePlates) do
+        UpdateRow(row, unit)
+        if distances then UpdatePlateDistance(row, unit) end
+    end
+    UpdatePanel()
+end
+
+local function StartTicker()
+    if ticker then ticker:Cancel() end
+    ticker = C_Timer.NewTicker(db.interval, Tick)
+end
+
+local function FullRefresh()
+    ResolveSpells()
+    RefreshAllPlates()
+    LayoutPanel()
+    UpdatePanel()
+end
+
+local function Print(msg)
+    print("|cff4fb3ffRange Lens|r: " .. msg)
+end
+
+---------------------------------------------------------------------------
+-- Options window
+---------------------------------------------------------------------------
+
+local optionRefreshers = {} -- functions that pull settings into widgets
+local RefreshOptions        -- defined below
+
+local function TryCreate(kind, name, parent, templates)
+    for _, template in ipairs(templates) do
+        local ok, made = pcall(CreateFrame, kind, name, parent, template)
+        if ok and made then return made, template end
+    end
+    return CreateFrame(kind, name, parent), "bare"
+end
+
+-- Every non-passive spell in the spellbook that has a range, one per name.
+local function ScanSpellBook()
+    local out, seen = {}, {}
+    local function Add(name, id, icon)
+        if type(name) ~= "string" or name == "" or seen[name:lower()] then return end
+        local ok, ranged = pcall(SpellHasRange, id or name)
+        local range
+        if ok and not Truthy(ranged, true) then
+            local radius = AoeRadius(name, id)
+            if not radius then return end
+            range = radius .. (CONE[name] and " yd cone" or " yd around you")
+        else
+            local _, _, _, minRange, maxRange = SpellInfo(id or name)
+            range = RangeText(minRange, maxRange)
+            range = range and (range .. " yd")
+        end
+        seen[name:lower()] = true
+        out[#out + 1] = { name = name, icon = icon or QUESTION_ICON, range = range }
+    end
+
+    local book = C_SpellBook
+    if book and book.GetNumSpellBookSkillLines and book.GetSpellBookItemInfo then
+        local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0
+        local spellType = Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.Spell
+        pcall(function()
+            for line = 1, book.GetNumSpellBookSkillLines() do
+                local info = book.GetSpellBookSkillLineInfo(line)
+                if info and not info.shouldHide and not info.isGuild and not info.offSpecID then
+                    for i = info.itemIndexOffset + 1, info.itemIndexOffset + info.numSpellBookItems do
+                        local item = book.GetSpellBookItemInfo(i, bank)
+                        if item and item.spellID and not item.isPassive
+                            and (not spellType or item.itemType == spellType) then
+                            Add(item.name, item.spellID, item.iconID)
+                        end
+                    end
+                end
+            end
+        end)
+    elseif GetNumSpellTabs and GetSpellTabInfo and GetSpellBookItemInfo then
+        pcall(function()
+            for tab = 1, GetNumSpellTabs() do
+                local _, _, offset, count = GetSpellTabInfo(tab)
+                for i = offset + 1, offset + count do
+                    local kind, id = GetSpellBookItemInfo(i, "spell")
+                    local passive = IsPassiveSpell and IsPassiveSpell(i, "spell")
+                    if kind == "SPELL" and id and not passive then
+                        local name, icon = SpellInfo(id)
+                        Add(name, id, icon)
+                    end
+                end
+            end
+        end)
+    end
+
+    -- Tracked entries the book did not offer (not learned yet, or no range).
+    for _, entry in ipairs(cdb.spells) do
+        local name, icon = SpellInfo(entry)
+        local label = tostring(name or entry)
+        if not seen[label:lower()] then
+            seen[label:lower()] = true
+            out[#out + 1] = { name = label, icon = icon or QUESTION_ICON, unknown = name == nil }
+        end
+    end
+    return out
+end
+
+local function SetTracked(name, on)
+    local i = FindEntry(name)
+    if on and not i then
+        tinsert(cdb.spells, name)
+    elseif not on and i then
+        tremove(cdb.spells, i)
+    end
+    FullRefresh()
+    RefreshOptions()
+end
+
+local function CreateCheck(parent, label)
+    local cb = TryCreate("CheckButton", nil, parent, { "UICheckButtonTemplate", "ChatConfigCheckButtonTemplate" })
+    cb:SetSize(24, 24)
+    -- Own label: the templates disagree about where theirs lives.
+    cb.label = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    cb.label:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+    cb.label:SetText(label or "")
+    return cb
+end
+
+local function OptionCheck(parent, label, key, x, y, after)
+    local cb = CreateCheck(parent, label)
+    cb:SetPoint("TOPLEFT", x, y)
+    cb:SetScript("OnClick", function(self)
+        db[key] = self:GetChecked() and true or false
+        if after then after() end
+    end)
+    optionRefreshers[#optionRefreshers + 1] = function() cb:SetChecked(db[key] and true or false) end
+    return cb
+end
+
+local sliderCount = 0
+local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
+    sliderCount = sliderCount + 1
+    local name = "RangeLensOptionsSlider" .. sliderCount
+    local holder = CreateFrame("Frame", nil, parent)
+    holder:SetPoint("TOPLEFT", x, y)
+    holder:SetSize(width, 40)
+
+    local caption = holder:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    caption:SetPoint("TOPLEFT", 0, 0)
+    caption:SetText(label)
+    local value = holder:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    value:SetPoint("TOPRIGHT", 0, -1)
+
+    local slider = TryCreate("Slider", name, holder, { "MinimalSliderTemplate", "UISliderTemplate", "OptionsSliderTemplate" })
+    for _, suffix in ipairs({ "Low", "High", "Text" }) do
+        local extra = _G[name .. suffix]
+        if extra then extra:SetText("") extra:Hide() end
+    end
+    if slider.SetOrientation then slider:SetOrientation("HORIZONTAL") end
+    slider:SetPoint("TOPLEFT", 2, -18)
+    slider:SetSize(width - 6, 18)
+    slider:SetMinMaxValues(minV, maxV)
+    if slider.SetValueStep then slider:SetValueStep(1) end
+    if slider.SetObeyStepOnDrag then pcall(slider.SetObeyStepOnDrag, slider, true) end
+
+    slider:SetScript("OnValueChanged", function(self, v)
+        v = math.floor(v + 0.5)
+        value:SetText(v)
+        if self.syncing then return end
+        db[key] = v
+        FullRefresh()
+    end)
+    optionRefreshers[#optionRefreshers + 1] = function()
+        slider.syncing = true
+        slider:SetValue(db[key])
+        slider.syncing = false
+        value:SetText(db[key])
+    end
+end
+
+local ROW_H = 26
+local W = 380
+
+local CONTENT_H = 616
+
+local content              -- every control, in one frame
+local window               -- standalone window, used only when the game's page can't open
+local settingsPage, settingsCategory
+local nativeOpenFailed = false
+local UpdateMinimapButton  -- defined below
+
+-- Builds every control into one frame. It is shown on the game's own
+-- Options > AddOns > RangeLens page, or in a standalone window when that
+-- page can't be opened.
+local function BuildContent()
+    local c = CreateFrame("Frame")
+    c:SetSize(W, CONTENT_H)
+    c:Hide()
+    local top = -4
+
+    -- Display settings
+    OptionCheck(c, "Nameplate icons", "plates", 16, top, RefreshAllPlates)
+    OptionCheck(c, "Enemies only", "enemyOnly", 200, top, RefreshAllPlates)
+    OptionCheck(c, "Target panel", "panel", 16, top - 26, UpdatePanel)
+    OptionCheck(c, "Lock panel", "locked", 200, top - 26, function() LayoutPanel() UpdatePanel() end)
+    OptionCheck(c, "Show cooldowns", "cooldowns", 16, top - 52, RefreshCooldowns)
+    OptionCheck(c, "Show spell range", "showRange", 200, top - 52, FullRefresh)
+    OptionCheck(c, "Minimap button", "minimap", 16, top - 78, function() UpdateMinimapButton() end)
+    OptionCheck(c, "Distance on panel", "showDistance", 200, top - 78, UpdatePanel)
+    OptionCheck(c, "Distance on nameplates", "plateDistance", 16, top - 104, RefreshAllPlates)
+
+    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 140, 160)
+    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 140, 160)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 188, 160)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 188, 160)
+
+    -- Spell list
+    local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", 18, top - 240)
+    header:SetText("Spells to range check")
+    local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
+    hint:SetPoint("RIGHT", c, "RIGHT", -18, 0)
+    hint:SetJustifyH("LEFT")
+    hint:SetText("Your spellbook spells that have a range, plus 10-yard spells around you (checked at 10 yards). Icons appear in the order you tick them (the number on the right).")
+
+    local area = CreateFrame("Frame", nil, c)
+    local areaBg = area:CreateTexture(nil, "BACKGROUND")
+    areaBg:SetAllPoints()
+    areaBg:SetColorTexture(0, 0, 0, 0.35)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 288)
+    area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
+
+    local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
+    if not (ok and scroll) then
+        scroll = CreateFrame("ScrollFrame", "RangeLensOptionsScroll", c)
+        scroll:EnableMouseWheel(true)
+        scroll:SetScript("OnMouseWheel", function(self, delta)
+            local range = self:GetVerticalScrollRange() or 0
+            self:SetVerticalScroll(math.max(0, math.min(range, self:GetVerticalScroll() - delta * ROW_H * 3)))
+        end)
+    end
+    scroll:SetPoint("TOPLEFT", area, "TOPLEFT", 6, -6)
+    scroll:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -22, 6)
+    local child = CreateFrame("Frame", nil, scroll)
+    local childW = W - 24 - 28
+    child:SetSize(childW, 1)
+    scroll:SetScrollChild(child)
+    c.rows = {}
+
+    local function Row(i)
+        local row = c.rows[i]
+        if row then return row end
+        row = CreateFrame("Button", nil, child)
+        row:SetSize(childW, ROW_H)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H)
+        local hl = row:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0.08)
+
+        row.check = CreateCheck(row)
+        row.check:SetPoint("LEFT", 2, 0)
+        row.icon = CreateIcon(row)
+        SizeIcon(row.icon, 20, false)
+        row.icon:SetPoint("LEFT", row.check, "RIGHT", 6, 0)
+        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.name:SetPoint("RIGHT", row, "RIGHT", -30, 0)
+        row.name:SetJustifyH("LEFT")
+        row.order = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.order:SetPoint("RIGHT", -6, 0)
+
+        row.check:SetScript("OnClick", function(self)
+            SetTracked(row.spellName, self:GetChecked() and true or false)
+        end)
+        row:SetScript("OnClick", function()
+            SetTracked(row.spellName, not FindEntry(row.spellName))
+        end)
+        c.rows[i] = row
+        return row
+    end
+
+    function c:Populate()
+        local list = ScanSpellBook()
+        for i, item in ipairs(list) do
+            local row = Row(i)
+            row.spellName = item.name
+            row.icon.dim:SetTexture(item.icon)
+            row.icon.lit:SetTexture(item.icon)
+            row.icon.lit:SetAlpha(1)
+            local index = FindEntry(item.name)
+            row.check:SetChecked(index ~= nil)
+            row.icon.range:SetText("")
+            row.name:SetText(item.name
+                .. (item.range and (" |cffaaaaaa" .. item.range .. "|r") or "")
+                .. (item.unknown and " |cff888888(not in spellbook)|r" or ""))
+            row.order:SetText(index and tostring(index) or "")
+            row:Show()
+        end
+        for i = #list + 1, #c.rows do c.rows[i]:Hide() end
+        child:SetHeight(math.max(1, #list * ROW_H))
+        c.count:SetText(#cdb.spells .. " tracked")
+    end
+
+    local defaults = TryCreate("Button", nil, c, { "UIPanelButtonTemplate" })
+    defaults:SetSize(120, 22)
+    defaults:SetPoint("BOTTOMLEFT", 14, 6)
+    defaults:SetText("Class defaults")
+    defaults:SetScript("OnClick", function()
+        local _, class = UnitClass("player")
+        wipe(cdb.spells)
+        for _, s in ipairs(CLASS_DEFAULTS[class] or {}) do tinsert(cdb.spells, s) end
+        FullRefresh()
+        RefreshOptions()
+    end)
+    local clear = TryCreate("Button", nil, c, { "UIPanelButtonTemplate" })
+    clear:SetSize(90, 22)
+    clear:SetPoint("LEFT", defaults, "RIGHT", 6, 0)
+    clear:SetText("Clear all")
+    clear:SetScript("OnClick", function()
+        wipe(cdb.spells)
+        FullRefresh()
+        RefreshOptions()
+    end)
+    c.count = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    c.count:SetPoint("BOTTOMRIGHT", -18, 12)
+
+    c:SetScript("OnShow", function() RefreshOptions() end)
+    return c
+end
+
+local function EnsureContent()
+    if content then return content end
+    local ok, made = pcall(BuildContent)
+    if not ok then
+        Print("the options could not be built: " .. tostring(made))
+        return nil
+    end
+    content = made
+    return content
+end
+
+-- Moves the controls into `parent`.
+local function Host(parent, x, y, scale)
+    scale = scale or 1
+    content:SetParent(parent)
+    content:ClearAllPoints()
+    content:SetScale(scale)
+    content:SetPoint("TOPLEFT", parent, "TOPLEFT", x / scale, y / scale)
+    content:Show()
+    RefreshOptions()
+end
+
+local function BuildWindow()
+    local f, template = TryCreate("Frame", "RangeLensOptions", UIParent,
+        { "ButtonFrameTemplate", "BasicFrameTemplateWithInset" })
+    local top = template == "ButtonFrameTemplate" and -60 or -28
+    f:SetSize(W, CONTENT_H - top + 6)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetToplevel(true)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:SetClampedToScreen(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:Hide()
+    tinsert(UISpecialFrames, "RangeLensOptions")
+
+    if template == "bare" then
+        local bg = f:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0.05, 0.05, 0.07, 0.95)
+    end
+    if f.SetTitle then f:SetTitle("Range Lens")
+    elseif f.TitleText then f.TitleText:SetText("Range Lens")
+    elseif f.TitleContainer and f.TitleContainer.TitleText then f.TitleContainer.TitleText:SetText("Range Lens")
+    else
+        local t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        t:SetPoint("TOP", 0, -8)
+        t:SetText("Range Lens")
+    end
+    local portrait = "Interface\\Icons\\Ability_Hunter_SniperShot"
+    if f.SetPortraitToAsset then pcall(f.SetPortraitToAsset, f, portrait)
+    elseif f.PortraitContainer and f.PortraitContainer.portrait then f.PortraitContainer.portrait:SetTexture(portrait) end
+    if not (f.CloseButton or _G["RangeLensOptionsCloseButton"]) then
+        local close = TryCreate("Button", nil, f, { "UIPanelCloseButton" })
+        close:SetPoint("TOPRIGHT", 2, 2)
+        close:SetScript("OnClick", function() f:Hide() end)
+    end
+
+    f:SetScript("OnShow", function(self) Host(self, 0, top, 1) end)
+    return f
+end
+
+local function ShowWindow()
+    if not EnsureContent() then return end
+    if not window then
+        local ok, made = pcall(BuildWindow)
+        if not ok then
+            Print("the options window could not be built: " .. tostring(made))
+            return
+        end
+        window = made
+    end
+    window:Show()
+    if window.Raise then window:Raise() end
+end
+
+RefreshOptions = function()
+    if not (content and content:IsVisible()) then return end
+    for _, refresh in ipairs(optionRefreshers) do refresh() end
+    content:Populate()
+end
+
+-- Opens Options > AddOns > RangeLens, the way Shard Grid's minimap button does.
+-- If the game won't show it, the standalone window is used from then on.
+-- A second click closes whichever is open.
+-- The page is created without a parent, and a shown frame with no parent counts
+-- as visible, so it is only open while the game's options panel is showing it.
+local function PageOpen()
+    return settingsPage ~= nil and SettingsPanel ~= nil and SettingsPanel:IsShown()
+        and settingsPage:GetParent() ~= nil and settingsPage:IsVisible()
+end
+
+local function ToggleOptions()
+    if PageOpen() then
+        -- Closing a Blizzard panel from addon code may be refused; its own Close button always works.
+        if SettingsPanel and HideUIPanel then pcall(HideUIPanel, SettingsPanel) end
+        return
+    end
+    if window and window:IsShown() then
+        window:Hide()
+        return
+    end
+    if settingsCategory and Settings and Settings.OpenToCategory and not nativeOpenFailed then
+        local id = settingsCategory.GetID and settingsCategory:GetID() or settingsCategory.ID or settingsCategory
+        pcall(Settings.OpenToCategory, id)
+        -- Trust what is on screen, not the call's return value.
+        if PageOpen() then return end
+        nativeOpenFailed = true
+    end
+    ShowWindow()
+end
+
+panel:SetScript("OnMouseUp", function(_, button)
+    if button == "RightButton" then ToggleOptions() end
+end)
+
+-- The Options > AddOns > RangeLens page. A canvas page only: proxy settings
+-- (Settings.RegisterProxySetting) tainted Blizzard's nameplates on WoW Forever.
+local function RegisterOptionsPage()
+    if not (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory) then return end
+    local page = CreateFrame("Frame")
+    local title = page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Range Lens")
+    page:SetScript("OnShow", function(self)
+        if not EnsureContent() then return end
+        if window and window:IsShown() then window:Hide() end
+        local w, h = self:GetWidth() or 0, self:GetHeight() or 0
+        local scale = 1
+        if w > 0 and h > 0 then scale = math.min(1, (w - 20) / W, (h - 50) / CONTENT_H) end
+        Host(self, 6, -42, scale)
+    end)
+    local category = Settings.RegisterCanvasLayoutCategory(page, "Range Lens")
+    if category then
+        Settings.RegisterAddOnCategory(category)
+        settingsPage, settingsCategory = page, category
+    end
+end
+
+-- Minimap button: left-click options, right-click lock/unlock the panel,
+-- drag to move it round the rim. Same build as Shard Grid's.
+local mmButton
+
+local function PlaceMinimapButton()
+    if not mmButton then return end
+    local angle = math.rad(db.minimapAngle or 200)
+    local radius = (Minimap:GetWidth() or 140) / 2 + 6
+    mmButton:ClearAllPoints()
+    mmButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
+end
+
+UpdateMinimapButton = function()
+    if not Minimap then return end
+    if not mmButton then
+        if not db.minimap then return end
+        mmButton = CreateFrame("Button", "RangeLensMinimapButton", Minimap)
+        mmButton:SetSize(31, 31)
+        mmButton:SetFrameStrata("MEDIUM")
+        mmButton:SetFrameLevel((Minimap:GetFrameLevel() or 1) + 8)
+        mmButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        mmButton:RegisterForDrag("LeftButton")
+        mmButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+        local bg = mmButton:CreateTexture(nil, "BACKGROUND")
+        bg:SetSize(20, 20)
+        bg:SetPoint("TOPLEFT", 7, -5)
+        bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+
+        local icon = mmButton:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(18, 18)
+        icon:SetPoint("TOPLEFT", 7, -6)
+        icon:SetTexture("Interface\\Icons\\Ability_Hunter_SniperShot")
+        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+        local border = mmButton:CreateTexture(nil, "OVERLAY")
+        border:SetSize(53, 53)
+        border:SetPoint("TOPLEFT")
+        border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+        mmButton:SetScript("OnClick", function(_, button)
+            if button == "RightButton" then
+                db.locked = not db.locked
+                LayoutPanel()
+                UpdatePanel()
+                RefreshOptions()
+                Print("panel " .. (db.locked and "locked" or "unlocked, drag to move"))
+            else
+                ToggleOptions()
+            end
+        end)
+        mmButton:SetScript("OnDragStart", function(self)
+            self:SetScript("OnUpdate", function()
+                local mx, my = Minimap:GetCenter()
+                local scale = Minimap:GetEffectiveScale()
+                local cx, cy = GetCursorPosition()
+                if not (mx and my and cx and cy) then return end
+                db.minimapAngle = math.deg(math.atan2(cy / scale - my, cx / scale - mx)) % 360
+                PlaceMinimapButton()
+            end)
+        end)
+        mmButton:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
+        mmButton:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText("Range Lens", 1, 1, 1)
+            GameTooltip:AddLine(#cdb.spells .. " spells tracked", 0.31, 0.7, 1)
+            GameTooltip:AddLine("Left-click: options", 0.7, 0.7, 0.7)
+            GameTooltip:AddLine("Right-click: lock / unlock the panel", 0.7, 0.7, 0.7)
+            GameTooltip:AddLine("Drag: move around the minimap", 0.7, 0.7, 0.7)
+            GameTooltip:Show()
+        end)
+        mmButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    mmButton:SetShown(db.minimap and true or false)
+    PlaceMinimapButton()
+end
+
+---------------------------------------------------------------------------
+-- Slash commands
+---------------------------------------------------------------------------
+
+local function ParseSpellArg(arg)
+    arg = strtrim(arg or "")
+    if arg == "" then return nil end
+    return tonumber(arg) or arg
+end
+
+local HELP = {
+    "/rl - open the options (Options > AddOns > Range Lens)",
+    "/rl minimap - show or hide the minimap button",
+    "/rl debug - print the range answers for your target and each nameplate",
+    "/rl add <spell name or ID> - track a spell",
+    "/rl remove <spell or list number> - stop tracking",
+    "/rl list - show tracked spells",
+    "/rl clear | /rl defaults - empty the list or load class defaults",
+    "/rl plates | /rl panel - toggle nameplate icons or target panel",
+    "/rl enemy - toggle enemies-only on nameplates",
+    "/rl cooldowns - toggle cooldown swipes",
+    "/rl range - toggle the spell range number on icons",
+    "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
+    "/rl lock | /rl unlock - lock or move the target panel",
+    "/rl size <n> | /rl panelsize <n> - icon sizes",
+    "/rl offset <n> | /rl offsetx <n> - nameplate row up/down and left/right",
+    "/rl dim <0-1> - strength of the out-of-range look",
+    "/rl reset - restore all settings (keeps spell list)",
+}
+
+local function OnOff(v) return v and "|cff40ff40on|r" or "|cffff4040off|r" end
+
+local function Slash(msg)
+    local cmd, rest = strsplit(" ", strtrim(msg or ""), 2)
+    cmd = (cmd or ""):lower()
+
+    if cmd == "" or cmd == "options" or cmd == "config" then
+        ToggleOptions()
+        return
+    elseif cmd == "add" then
+        local q = ParseSpellArg(rest)
+        if not q then return Print("usage: /rl add <spell name or ID>") end
+        if FindEntry(q) and type(q) ~= "number" then return Print("already tracking " .. tostring(q)) end
+        local name = SpellInfo(q)
+        if not name then
+            Print(tostring(q) .. " isn't in your spellbook right now. Added anyway; it will show once learned.")
+        elseif not Truthy(SpellHasRange(name), true) then
+            local radius = AoeRadius(name, select(3, SpellInfo(q)))
+            if not radius then
+                Print(name .. " has no range, so it will never light up.")
+            end
+        end
+        tinsert(cdb.spells, name or q)
+        FullRefresh()
+        Print("tracking " .. tostring(name or q))
+    elseif cmd == "remove" or cmd == "rm" then
+        local q = ParseSpellArg(rest)
+        local i = q and FindEntry(q)
+        if not i then return Print("not found: " .. tostring(q)) end
+        local removed = tremove(cdb.spells, i)
+        FullRefresh()
+        Print("removed " .. tostring(removed))
+    elseif cmd == "list" then
+        if #cdb.spells == 0 then return Print("no spells tracked. /rl add <spell> or /rl defaults") end
+        for i, entry in ipairs(cdb.spells) do
+            local name = SpellInfo(entry)
+            Print(i .. ". " .. tostring(name or entry) .. (name and "" or " |cff888888(not known)|r"))
+        end
+    elseif cmd == "clear" then
+        wipe(cdb.spells)
+        FullRefresh()
+        Print("spell list cleared")
+    elseif cmd == "defaults" then
+        local _, class = UnitClass("player")
+        wipe(cdb.spells)
+        for _, s in ipairs(CLASS_DEFAULTS[class] or {}) do tinsert(cdb.spells, s) end
+        FullRefresh()
+        Print("loaded defaults for " .. tostring(class) .. " (" .. #resolved .. " known)")
+    elseif cmd == "plates" then
+        db.plates = not db.plates
+        RefreshAllPlates()
+        Print("nameplate icons " .. OnOff(db.plates))
+    elseif cmd == "panel" then
+        db.panel = not db.panel
+        UpdatePanel()
+        Print("target panel " .. OnOff(db.panel))
+    elseif cmd == "enemy" then
+        db.enemyOnly = not db.enemyOnly
+        RefreshAllPlates()
+        Print("enemies only " .. OnOff(db.enemyOnly))
+    elseif cmd == "cooldowns" then
+        db.cooldowns = not db.cooldowns
+        RefreshCooldowns()
+        Print("cooldowns " .. OnOff(db.cooldowns))
+    elseif cmd == "debug" then
+        -- What the game answers for every tracked spell on the target and each nameplate.
+        local function Show(v)
+            if isSecret(v) then return "|cffff80ffsecret|r" end
+            if v == nil then return "|cff888888nil|r" end
+            return v and "|cff40ff40true|r" or "|cffff4040false|r"
+        end
+        Print(("version %s, %d spells resolved, nameplate icons %s, enemies only %s"):format(
+            tostring(C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")),
+            #resolved, OnOff(db.plates), OnOff(db.enemyOnly)))
+        local units = { "target" }
+        for unit in pairs(plateUnits) do units[#units + 1] = unit end
+        local shown = 0
+        for _, unit in ipairs(units) do
+            if Truthy(UnitExists(unit), true) then
+                local parts = {}
+                for _, spell in ipairs(resolved) do
+                    local _, _, _, minR, maxR = SpellInfo(spell.query)
+                    local reach = spell.aoe and (spell.aoe .. "yd around") or ((isSecret(maxR) and "?" or tostring(maxR)) .. "yd")
+                    parts[#parts + 1] = spell.query .. "[" .. reach .. "]=" .. Show(CheckSpell(spell, unit))
+                end
+                local d = {}
+                for _, c in ipairs(Checkers()) do
+                    d[#d + 1] = c.yards .. (c.item and ("yd item " .. c.item) or "yd interact") .. " " .. Show(RunChecker(c, unit))
+                end
+                Print("  distance " .. tostring(DistanceText(unit)) .. " yd; checks: " .. (#d > 0 and table.concat(d, ", ") or "none")
+                    .. (interactBlocked and " (interact blocked this session)" or ""))
+                local row = activePlates[unit]
+                Print(("%s %s: attackable %s, icons %s | %s"):format(unit, tostring(UnitName(unit)),
+                    Show(UnitCanAttack("player", unit)),
+                    unit == "target" and "(panel)" or (row and (row:IsShown() and "shown" or "hidden") or "|cffff4040none|r"),
+                    table.concat(parts, ", ")))
+                shown = shown + 1
+            end
+        end
+        if shown == 0 then Print("no target and no nameplates in view") end
+    elseif cmd == "minimap" then
+        db.minimap = not db.minimap
+        UpdateMinimapButton()
+        Print("minimap button " .. OnOff(db.minimap))
+    elseif cmd == "distance" then
+        db.showDistance = not db.showDistance
+        UpdatePanel()
+        Print("distance on panel " .. OnOff(db.showDistance))
+    elseif cmd == "platedistance" then
+        db.plateDistance = not db.plateDistance
+        RefreshAllPlates()
+        Print("distance on nameplates " .. OnOff(db.plateDistance))
+    elseif cmd == "range" then
+        db.showRange = not db.showRange
+        FullRefresh()
+        Print("spell range numbers " .. OnOff(db.showRange))
+    elseif cmd == "lock" or cmd == "unlock" then
+        db.locked = (cmd == "lock")
+        LayoutPanel()
+        UpdatePanel()
+        Print("panel " .. (db.locked and "locked" or "unlocked, drag to move"))
+    elseif cmd == "size" or cmd == "panelsize" or cmd == "offset" or cmd == "offsetx" or cmd == "dim" then
+        local n = tonumber(rest)
+        if not n then return Print("usage: /rl " .. cmd .. " <number>") end
+        if cmd == "size" then db.plateIconSize = math.max(8, math.min(48, n))
+        elseif cmd == "panelsize" then db.panelIconSize = math.max(12, math.min(96, n))
+        elseif cmd == "offset" then db.plateOffsetY = n
+        elseif cmd == "offsetx" then db.plateOffsetX = n
+        else db.outAlpha = math.max(0, math.min(1, n)) end
+        FullRefresh()
+        Print(cmd .. " set to " .. n)
+    elseif cmd == "reset" then
+        local spells = cdb.spells
+        wipe(db)
+        CopyDefaults(DEFAULTS, db)
+        cdb.spells = spells
+        PlacePanel()
+        StartTicker()
+        FullRefresh()
+        Print("settings reset")
+    else
+        Print("commands:")
+        for _, line in ipairs(HELP) do print("  " .. line) end
+    end
+    RefreshOptions()
+end
+
+SLASH_RANGELENS1 = "/rangelens"
+SLASH_RANGELENS2 = "/rl"
+SlashCmdList.RANGELENS = Slash
+
+---------------------------------------------------------------------------
+-- Events
+---------------------------------------------------------------------------
+
+local ev = CreateFrame("Frame")
+ev:RegisterEvent("ADDON_LOADED")
+ev:RegisterEvent("PLAYER_LOGIN")
+ev:RegisterEvent("SPELLS_CHANGED")
+ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+ev:RegisterEvent("NAME_PLATE_UNIT_ADDED")
+ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+ev:RegisterEvent("ADDON_ACTION_BLOCKED")
+ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+-- Talent changes: re-read every spell's range (not every client has every event).
+for _, e in ipairs({ "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED" }) do
+    pcall(ev.RegisterEvent, ev, e)
+end
+ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
+
+local ready = false
+
+ev:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if event == "ADDON_LOADED" then
+        if arg1 ~= ADDON_NAME then return end
+        RangeLensDB = RangeLensDB or {}
+        RangeLensCharDB = RangeLensCharDB or {}
+        db, cdb = RangeLensDB, RangeLensCharDB
+        -- 0.3.1 moved the nameplate row down; carry the old default across.
+        if not db.offsetMoved then
+            if db.plateOffsetY == -2 then db.plateOffsetY = nil end
+            db.offsetMoved = true
+        end
+        CopyDefaults(DEFAULTS, db)
+        if not cdb.spells then
+            local _, class = UnitClass("player")
+            cdb.spells = {}
+            for _, s in ipairs(CLASS_DEFAULTS[class] or {}) do tinsert(cdb.spells, s) end
+        end
+    elseif event == "PLAYER_LOGIN" then
+        ready = true
+        PlacePanel()
+        FullRefresh()
+        StartTicker()
+        SetRaceDistances()
+        LoadRangeItems()
+        pcall(RegisterOptionsPage)
+        UpdateMinimapButton()
+    elseif not ready then
+        -- Remember plates that appear before login so FullRefresh picks them up.
+        if event == "NAME_PLATE_UNIT_ADDED" then plateUnits[arg1] = true
+        elseif event == "NAME_PLATE_UNIT_REMOVED" then plateUnits[arg1] = nil end
+        return
+    elseif event == "SPELLS_CHANGED" or event == "CHARACTER_POINTS_CHANGED"
+        or event == "PLAYER_TALENT_UPDATE" or event == "TRAIT_CONFIG_UPDATED" then
+        FullRefresh()
+        RefreshOptions()
+    elseif event == "SPELL_UPDATE_COOLDOWN" then
+        RefreshCooldowns()
+    elseif event == "NAME_PLATE_UNIT_ADDED" then
+        plateUnits[arg1] = true
+        OnPlateAdded(arg1)
+    elseif event == "NAME_PLATE_UNIT_REMOVED" then
+        plateUnits[arg1] = nil
+        OnPlateRemoved(arg1)
+    elseif event == "PLAYER_TARGET_CHANGED" then
+        UpdatePanel()
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+        OnItemLoaded(arg1, arg2)
+    elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
+        -- The only call here that could be refused is CheckInteractDistance;
+        -- the item checks carry on without it.
+        if arg1 == ADDON_NAME and not interactBlocked then
+            interactBlocked = true
+            checkerCache = nil
+            Print("the game refused an interact distance check; using item checks only this session.")
+        end
+    end
+end)

@@ -1,0 +1,12 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+	<!-- The scroll list in the options window. Same template Aura Ledger uses on
+	     WoW Forever: modern ScrollFrameTemplate with the minimal scroll bar. -->
+	<ScrollFrame name="RangeLensScrollFrameTemplate" inherits="ScrollFrameTemplate" virtual="true">
+		<KeyValues>
+			<KeyValue key="scrollBarX" value="6" type="number"/>
+			<KeyValue key="scrollBarTopY" value="0" type="number"/>
+			<KeyValue key="scrollBarBottomY" value="0" type="number"/>
+			<KeyValue key="scrollBarTemplate" value="MinimalScrollBar" type="string"/>
+		</KeyValues>
+	</ScrollFrame>
+</Ui>
