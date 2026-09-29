@@ -2,6 +2,11 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.0.3 - 2026-09-29
+
+- The cooldown sweep is dark now. It had been drawn pale; it is now black at 85% (the Cooldown Manager uses 70%), and it turns red while the spell is out of range.
+- Fixed: switching cooldowns off, or a spell with no cooldown data, called a function the game reserves for its own code. The sweep is now simply hidden instead.
+
 ## 1.0.2 - 2026-09-29
 
 - Frost Nova's freeze turned out to reach past 8 yards, so 1.0.1 lit its icon too late. The icon is now checked 1 yard short of the spell's radius: 9 yards, or 11 with Arctic Reach at 2/2 (checked at 10).

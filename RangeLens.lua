@@ -371,6 +371,10 @@ local EDGE_FILE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
 local OUT_R, OUT_G, OUT_B = 0.64, 0.15, 0.15
 local OOR_ALPHA = 0.5
 local OVERLAY_X, OVERLAY_Y = 9 / 50, 8 / 50
+-- The swipe art is a plain white shape the colour is laid over. The manager's
+-- cooldown swipe is black at 0.7; this one is darker, and red while out of range.
+local SWIPE_NORMAL = { 0, 0, 0, 0.85 }
+local SWIPE_OUT = { 0.6, 0.05, 0.05, 0.85 }
 
 local function CreateIcon(parent)
     local f = CreateFrame("Frame", nil, parent)
@@ -417,7 +421,7 @@ local function CreateIcon(parent)
 
     f.cd = CreateFrame("Cooldown", nil, f)
     f.cd:SetAllPoints()
-    pcall(f.cd.SetSwipeTexture, f.cd, SWIPE_FILE, 1, 1, 1, 1)
+    pcall(f.cd.SetSwipeTexture, f.cd, SWIPE_FILE, unpack(SWIPE_NORMAL))
     pcall(f.cd.SetEdgeTexture, f.cd, EDGE_FILE)
     pcall(f.cd.SetDrawEdge, f.cd, false)
     pcall(f.cd.SetHideCountdownNumbers, f.cd, true)
@@ -473,11 +477,19 @@ local function SetIconSpell(icon, spell)
 end
 
 -- The one place a range result is consumed.
+local function SetSwipeOut(icon, out)
+    if icon.swipeOut ~= out then
+        icon.swipeOut = out
+        pcall(icon.cd.SetSwipeColor, icon.cd, unpack(out and SWIPE_OUT or SWIPE_NORMAL))
+    end
+end
+
 local function ApplyRange(icon, inRange)
     if isSecret(inRange) then
         -- Can't look at it. Let the engine decide the lit layer's alpha.
         -- Default args are "fully visible if true, invisible if false".
         icon:Show()
+        SetSwipeOut(icon, false) -- the answer is hidden, so the plain swipe
         if icon.lit.SetAlphaFromBoolean then
             icon.lit:SetAlphaFromBoolean(inRange)
         else
@@ -492,6 +504,7 @@ local function ApplyRange(icon, inRange)
     end
     icon:Show()
     icon.lit:SetAlpha(inRange and 1 or 0)
+    SetSwipeOut(icon, not inRange)
 end
 
 -- Cooldown swipe from the game's own duration object: the numbers inside it
@@ -501,12 +514,14 @@ local function ApplyCooldown(icon)
     local id = icon.spell and icon.spell.spellID
     if not (db.cooldowns and id and C_Spell and C_Spell.GetSpellCooldownDuration
         and cd.SetCooldownFromDurationObject) then
-        pcall(cd.Clear, cd)
+        -- Not Cooldown:Clear(): the game marks it as protected.
+        cd:Hide()
         return
     end
+    cd:Show()
     local ok, duration = pcall(C_Spell.GetSpellCooldownDuration, id, true)
     if not (ok and duration and pcall(cd.SetCooldownFromDurationObject, cd, duration, true)) then
-        pcall(cd.Clear, cd)
+        cd:Hide()
     end
 end
 
@@ -742,6 +757,7 @@ local function UpdatePanel()
             for i = 1, panel.row.count or 0 do
                 panel.row.icons[i]:Show()
                 panel.row.icons[i].lit:SetAlpha(1)
+                SetSwipeOut(panel.row.icons[i], false)
             end
         end
         return

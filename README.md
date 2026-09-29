@@ -8,7 +8,7 @@ Made for WoW Forever (Interface 16001).
 
 - **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted.
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
-- **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and cooldown sweep, with the countdown on the panel.
+- **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want; icons appear in the order you tick them.
 - **Range numbers.** Each icon shows the spell's range in yards.
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
