@@ -2,6 +2,12 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.2.0 - 2026-10-01
+
+- New option, Target's nameplate only: the nameplate icons show under your current target's nameplate and nowhere else. The target panel is unchanged. Also `/rl targetonly`.
+- New option, Hide nameplate icons in melee range: a nameplate's icons disappear while that mob is within 5 yards, and come back as it moves away. Also `/rl melee`.
+- Both are off unless you switch them on, under Options > AddOns > Range Lens.
+
 ## 1.1.0 - 2026-09-29
 
 - Too close shows in orange. A spell with a minimum range, such as Charge (8 to 25 yards), now tells you which side you are on: the icon and its cooldown sweep turn orange while you are inside the minimum, and stay red when you are too far. `/rl debug` adds "(too close)" to such a spell.

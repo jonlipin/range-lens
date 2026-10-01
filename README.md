@@ -6,7 +6,7 @@ Made for WoW Forever (Interface 16001).
 
 ## Features
 
-- **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted.
+- **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted. Or keep them to your target's nameplate only, and hide them while a mob is in melee range.
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
 - **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want; icons appear in the order you tick them.
@@ -35,6 +35,7 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 | `/rl add <spell>` / `/rl remove <spell or number>` | Track a spell, or stop tracking it |
 | `/rl list`, `/rl clear`, `/rl defaults` | Show, empty, or reset the list to your class's starting spells |
 | `/rl plates`, `/rl panel`, `/rl enemy` | Toggle nameplate icons, the target panel, enemies only |
+| `/rl targetonly`, `/rl melee` | Toggle icons on your target's nameplate only, hiding them in melee range |
 | `/rl cooldowns`, `/rl range` | Toggle the cooldown sweep, the range number on icons |
 | `/rl distance`, `/rl platedistance` | Toggle the distance on the panel, on nameplates |
 | `/rl lock`, `/rl unlock` | Lock the panel, or unlock it to drag |

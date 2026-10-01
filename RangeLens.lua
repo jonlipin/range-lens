@@ -271,6 +271,8 @@ local DEFAULTS = {
     showRange = true,       -- spell range in yards on each icon
     showDistance = true,    -- distance to the target above the panel
     plateDistance = true,   -- distance to each unit beside its nameplate icons
+    plateTargetOnly = false, -- nameplate icons only under your target's nameplate
+    plateHideMelee = false, -- hide a nameplate's icons while that unit is in melee range
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
@@ -623,13 +625,34 @@ local function PlateAnchor(plate)
     return plate
 end
 
+-- Is this nameplate your target's? Comparing the nameplate frames needs no
+-- unit comparison, which the game can hide in some places.
+local function IsTargetPlate(unit)
+    local ok, targetPlate = pcall(C_NamePlate.GetNamePlateForUnit, "target")
+    if ok then
+        return targetPlate ~= nil and targetPlate == C_NamePlate.GetNamePlateForUnit(unit)
+    end
+    return Truthy(UnitIsUnit(unit, "target"), false)
+end
+
+-- In melee range: the 5 yard item check passes.
+local function InMelee(unit)
+    local c = CheckerFor(5)
+    return c ~= nil and RunChecker(c, unit) == true
+end
+
 local function WantsPlate(unit)
     if not db.plates or #resolved == 0 then return false end
+    if db.plateTargetOnly and not IsTargetPlate(unit) then return false end
     if Truthy(UnitIsUnit("player", unit), false) then return false end
     if db.enemyOnly then
         return Truthy(UnitCanAttack("player", unit), true)
     end
     return true
+end
+
+local function UpdatePlateMelee(row, unit)
+    row:SetAlpha((db.plateHideMelee and InMelee(unit)) and 0 or 1)
 end
 
 local function UpdatePlateDistance(row, unit)
@@ -662,6 +685,7 @@ local function OnPlateAdded(unit)
     row:Show()
     activePlates[unit] = row
     UpdateRow(row, unit)
+    UpdatePlateMelee(row, unit)
     UpdatePlateDistance(row, unit)
     UpdateRowCooldowns(row)
 end
@@ -819,6 +843,7 @@ local function Tick()
     local distances = tickCount % 3 == 0
     for unit, row in pairs(activePlates) do
         UpdateRow(row, unit)
+        UpdatePlateMelee(row, unit)
         if distances then UpdatePlateDistance(row, unit) end
     end
     UpdatePanel()
@@ -1002,7 +1027,7 @@ end
 local ROW_H = 26
 local W = 380
 
-local CONTENT_H = 616
+local CONTENT_H = 642
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1029,15 +1054,17 @@ local function BuildContent()
     OptionCheck(c, "Minimap button", "minimap", 16, top - 78, function() UpdateMinimapButton() end)
     OptionCheck(c, "Distance on panel", "showDistance", 200, top - 78, UpdatePanel)
     OptionCheck(c, "Distance on nameplates", "plateDistance", 16, top - 104, RefreshAllPlates)
+    OptionCheck(c, "Target's nameplate only", "plateTargetOnly", 200, top - 104, RefreshAllPlates)
+    OptionCheck(c, "Hide nameplate icons in melee range", "plateHideMelee", 16, top - 130, RefreshAllPlates)
 
-    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 140, 160)
-    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 140, 160)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 188, 160)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 188, 160)
+    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 166, 160)
+    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 166, 160)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 214, 160)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 214, 160)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", 18, top - 240)
+    header:SetPoint("TOPLEFT", 18, top - 266)
     header:SetText("Spells to range check")
     local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
@@ -1049,7 +1076,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 288)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 314)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -1389,6 +1416,8 @@ local HELP = {
     "/rl clear | /rl defaults - empty the list or load class defaults",
     "/rl plates | /rl panel - toggle nameplate icons or target panel",
     "/rl enemy - toggle enemies-only on nameplates",
+    "/rl targetonly - toggle icons on your target's nameplate only",
+    "/rl melee - toggle hiding nameplate icons in melee range",
     "/rl cooldowns - toggle cooldown swipes",
     "/rl range - toggle the spell range number on icons",
     "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
@@ -1455,6 +1484,14 @@ local function Slash(msg)
         db.panel = not db.panel
         UpdatePanel()
         Print("target panel " .. OnOff(db.panel))
+    elseif cmd == "targetonly" then
+        db.plateTargetOnly = not db.plateTargetOnly
+        RefreshAllPlates()
+        Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
+    elseif cmd == "melee" then
+        db.plateHideMelee = not db.plateHideMelee
+        RefreshAllPlates()
+        Print("hide nameplate icons in melee range " .. OnOff(db.plateHideMelee))
     elseif cmd == "enemy" then
         db.enemyOnly = not db.enemyOnly
         RefreshAllPlates()
@@ -1619,6 +1656,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         plateUnits[arg1] = nil
         OnPlateRemoved(arg1)
     elseif event == "PLAYER_TARGET_CHANGED" then
+        if db.plateTargetOnly then RefreshAllPlates() end
         UpdatePanel()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         OnItemLoaded(arg1, arg2)
