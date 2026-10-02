@@ -45,30 +45,57 @@ local function SpellInfo(spell)
     return name, icon, id, minRange, maxRange
 end
 
--- "30", or "8-35" for a spell with a minimum range; nil when there is no range.
 -- Spells centred on you (or a cone in front of you) have no target range, so
--- the game's range check answers nil for them. Their radius, in yards, from
--- the Classic spell data; the descriptions of several don't say it.
+-- the game's range check answers nil for them. Their radius in yards, GENERATED
+-- from the game's own spell data for build 1.60.1.70009: every spell on a class
+-- skill line whose effect hits enemies in an area centred on you, at your feet,
+-- in a cone in front of you, or through a spell it pulses (Hellfire). Spells
+-- aimed at a target (Blizzard, Intimidating Shout) are left to the game's own
+-- range check. The radius is the smallest over all ranks.
 local AOE_RADIUS = {
-    ["Frost Nova"] = 10,
-    ["Arcane Explosion"] = 10,
-    ["Cone of Cold"] = 10,        -- a cone: facing is not checked
-    ["Blast Wave"] = 10,
-    ["Hellfire"] = 10,
-    ["Howl of Terror"] = 10,
-    ["Holy Nova"] = 10,
-    ["Intimidating Shout"] = 10,
+    ["Arcane Explosion"] = 10,    -- spell 1449, 8437, 8438, 8439, 10201, 10202
+    ["Blast Wave"] = 10,          -- spell 11113, 13018, 13019, 13020, 13021
+    ["Challenging Roar"] = 10,    -- spell 5209
+    ["Challenging Shout"] = 10,   -- spell 1161
+    ["Cone of Cold"] = 10,        -- cone, spell 120, 8492, 10159, 10160, 10161
+    ["Confounding Flash"] = 8,    -- spell 1277455
+    ["Consecration"] = 8,         -- spell 20116, 20922, 20923, 20924, 26573
+    ["Demonic Howl"] = 10,        -- spell 412789
+    ["Demoralizing Roar"] = 10,   -- spell 99, 1735, 9490, 9747, 9898
+    ["Demoralizing Shout"] = 10,  -- spell 1160, 6190, 11554, 11555, 11556
+    ["Divine Storm"] = 8,         -- spell 407778
+    ["Frost Nova"] = 10,          -- spell 122, 865, 6131, 10230
+    ["Hellfire"] = 10,            -- spell 1949, 11683, 11684
+    ["Holy Nova"] = 10,           -- spell 15237, 15430, 15431, 27799, 27800, 27801
+    ["Holy Wrath"] = 20,          -- spell 2812, 10318
+    ["Howl of Terror"] = 10,      -- spell 5484, 17928
+    ["Molten Blast"] = 10,        -- cone, spell 425339
+    ["Piercing Howl"] = 10,       -- spell 12323
+    ["Psychic Scream"] = 8,       -- spell 8122, 8124, 10888, 10890
+    ["Starfall"] = 30,            -- spell 439748
+    ["Suffering"] = 10,           -- spell 17735, 17750, 17751, 17752
+    ["Thunder Clap"] = 8,         -- spell 6343, 8198, 8204, 8205, 11580, 11581
+    ["Thunderstomp"] = 8,         -- spell 26090, 26187, 26188, 1264455
+    ["Whirlwind"] = 8,            -- spell 1680
 }
-local CONE = { ["Cone of Cold"] = true }
+local CONE = { ["Cone of Cold"] = true, ["Molten Blast"] = true }
 
--- Frost Nova's freeze lands 1 to 2 yards short of its damage on WoW Forever
--- (seen in game, 2026-09-29: it freezes past 8 yd but not at 10), although the spell data gives both the same 10 yd
--- radius. The icon is for the freeze, so its reach is this much shorter.
-local FREEZE_SHORTFALL = { ["Frost Nova"] = 1 }
+-- Built-in reach adjustments, in yards, for what actually lands in game where it
+-- differs from the data. Frost Nova's freeze lands short of its 10 yd damage on
+-- WoW Forever (seen in game 2026-09-29: it freezes past 9 yd but not at 10).
+-- Players tune these and any other spell in the options; theirs are saved
+-- account-wide in RangeLensDB.reach and replace these.
+local DEFAULT_REACH_ADJUST = { ["Frost Nova"] = -1 }
+
+local function ReachAdjust(name)
+    local tuned = RangeLensDB and RangeLensDB.reach and RangeLensDB.reach[name]
+    if tuned ~= nil then return tuned end
+    return DEFAULT_REACH_ADJUST[name] or 0
+end
 
 -- How far a self-centred spell does what the icon promises.
 local function AoeReach(name, radius)
-    return radius - (FREEZE_SHORTFALL[name] or 0)
+    return math.max(1, radius + ReachAdjust(name))
 end
 
 -- Talents that widen a self-centred spell, best rank first: { talent spell ID, factor }.
@@ -236,6 +263,7 @@ local function AoeRadius(name, id)
     end
 end
 
+-- "30", or "8-35" for a spell with a minimum range; nil when there is no range.
 local function RangeText(minRange, maxRange)
     if isSecret(minRange) or isSecret(maxRange) then return nil end
     if type(maxRange) ~= "number" or maxRange <= 0 then return nil end
@@ -912,23 +940,21 @@ local function ScanSpellBook()
     local function Add(name, id, icon)
         if type(name) ~= "string" or name == "" or seen[name:lower()] then return end
         local ok, ranged = pcall(SpellHasRange, id or name)
-        local range
+        local range, aoe
         if ok and not Truthy(ranged, true) then
             local radius = AoeRadius(name, id)
             if not radius then return end
             local reach = AoeReach(name, radius)
-            if reach < radius then
-                range = reach .. " yd freeze (" .. radius .. " yd damage)"
-            else
-                range = radius .. (CONE[name] and " yd cone" or " yd around you")
-            end
+            range = reach .. (CONE[name] and " yd cone" or " yd around you")
+            if reach ~= radius then range = range .. " (data " .. radius .. ")" end
+            aoe = true
         else
             local _, _, _, minRange, maxRange = SpellInfo(id or name)
             range = RangeText(minRange, maxRange)
             range = range and (range .. " yd")
         end
         seen[name:lower()] = true
-        out[#out + 1] = { name = name, icon = icon or QUESTION_ICON, range = range }
+        out[#out + 1] = { name = name, icon = icon or QUESTION_ICON, range = range, aoe = aoe }
     end
 
     local book = C_SpellBook
@@ -1103,7 +1129,7 @@ local function BuildContent()
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
     hint:SetPoint("RIGHT", c, "RIGHT", -18, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Your spellbook spells that have a range, plus 10-yard spells around you (checked at 10 yards). Icons appear in the order you tick them (the number on the right).")
+    hint:SetText("Your spellbook spells that have a range, plus spells that hit around you, with - and + to tune their reach. Icons appear in the order you tick them (the number on the right).")
 
     local area = CreateFrame("Frame", nil, c)
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
@@ -1151,6 +1177,25 @@ local function BuildContent()
         row.order = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         row.order:SetPoint("RIGHT", -6, 0)
 
+        -- Area spells: nudge the reach a yard at a time.
+        local function Nudge(delta)
+            local name = row.spellName
+            RangeLensDB.reach = RangeLensDB.reach or {}
+            RangeLensDB.reach[name] = ReachAdjust(name) + delta
+            FullRefresh()
+            RefreshOptions()
+        end
+        row.plus = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
+        row.plus:SetSize(20, 18)
+        row.plus:SetPoint("RIGHT", row, "RIGHT", -24, 0)
+        row.plus:SetText("+")
+        row.plus:SetScript("OnClick", function() Nudge(1) end)
+        row.minus = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
+        row.minus:SetSize(20, 18)
+        row.minus:SetPoint("RIGHT", row.plus, "LEFT", -2, 0)
+        row.minus:SetText("-")
+        row.minus:SetScript("OnClick", function() Nudge(-1) end)
+
         row.check:SetScript("OnClick", function(self)
             SetTracked(row.spellName, self:GetChecked() and true or false)
         end)
@@ -1176,6 +1221,9 @@ local function BuildContent()
                 .. (item.range and (" |cffaaaaaa" .. item.range .. "|r") or "")
                 .. (item.unknown and " |cff888888(not in spellbook)|r" or ""))
             row.order:SetText(index and tostring(index) or "")
+            row.plus:SetShown(item.aoe and true or false)
+            row.minus:SetShown(item.aoe and true or false)
+            row.name:SetPoint("RIGHT", row, "RIGHT", item.aoe and -70 or -30, 0)
             row:Show()
         end
         for i = #list + 1, #c.rows do c.rows[i]:Hide() end
@@ -1453,6 +1501,7 @@ local HELP = {
     "/rl melee - toggle hiding nameplate icons in melee range",
     "/rl cooldowns - toggle cooldown swipes",
     "/rl inrange - show only the spells that can reach (no red icons)",
+    "/rl reach <spell> <yards> - tune an area spell's reach (+/- from the data); /rl reach <spell> resets it",
     "/rl range - toggle the spell range number on icons",
     "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
     "/rl lock | /rl unlock - lock or move the target panel",
@@ -1522,6 +1571,18 @@ local function Slash(msg)
         db.plateTargetOnly = not db.plateTargetOnly
         RefreshAllPlates()
         Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
+    elseif cmd == "reach" then
+        local text = strtrim(rest or "")
+        local spellName, n = text:match("^(.-)%s+([%+%-]?%d+)$")
+        spellName = strtrim(spellName or text)
+        spellName = SpellInfo(spellName) or spellName -- the game's spelling and case
+        local radius = spellName ~= "" and AoeRadius(spellName, select(3, SpellInfo(spellName)))
+        if not radius then return Print("usage: /rl reach <spell> <yards>, for a spell that hits around you") end
+        RangeLensDB.reach[spellName] = n and tonumber(n) or nil
+        FullRefresh()
+        local adjust = ReachAdjust(spellName)
+        Print(("%s: data %d yd, checked at %d yd%s"):format(spellName, radius, AoeReach(spellName, radius),
+            adjust ~= 0 and (" (" .. (adjust > 0 and "+" or "") .. adjust .. ")") or ""))
     elseif cmd == "inrange" then
         db.inRangeOnly = not db.inRangeOnly
         FullRefresh()
@@ -1659,6 +1720,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         RangeLensDB = RangeLensDB or {}
+        RangeLensDB.reach = RangeLensDB.reach or {}
         RangeLensCharDB = RangeLensCharDB or {}
         cdb = RangeLensCharDB
         -- 1.3.0: settings are per character (the folder the game saves

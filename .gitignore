@@ -1,1 +1,3 @@
 *.zip
+tools/*.csv
+tools/*.json

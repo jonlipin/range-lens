@@ -14,7 +14,7 @@ Made for WoW Forever (Interface 16001).
 - **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.
 - **Or only what reaches.** Switch on Only show spells in range and an icon appears only while its spell can reach, with no red or orange at all.
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
-- **10 yard spells too.** Frost Nova, Arcane Explosion, Cone of Cold, Blast Wave, Hellfire, Howl of Terror, Holy Nova and Intimidating Shout have no target range, so the game can't check them. Range Lens checks them at 10 yards instead, and knows that Arctic Reach widens Frost Nova and Cone of Cold. Frost Nova's icon is for the freeze, which lands a little short of the damage, so it lights 1 yard closer.
+- **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Every one can be tuned with - and + in the options (Frost Nova starts 1 yard short, for its freeze), and Arctic Reach is counted.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
 - **Per character.** Each character keeps its own spells, panel position and settings.
 - **Safe in combat.** It never reads values the game keeps hidden in combat, and it skips the distance checks the game refuses on friendly units in combat.
@@ -41,6 +41,7 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 | `/rl melee` | Toggle hiding nameplate icons in melee range |
 | `/rl cooldowns`, `/rl range` | Toggle the cooldown sweep, the range number on icons |
 | `/rl inrange` | Toggle showing only the spells that can reach |
+| `/rl reach <spell> <yards>` | Tune an area spell's reach, in yards from its radius; without a number, reset it |
 | `/rl distance`, `/rl platedistance` | Toggle the distance on the panel, on nameplates |
 | `/rl lock`, `/rl unlock` | Lock the panel, or unlock it to drag |
 | `/rl size <n>`, `/rl panelsize <n>` | Icon sizes |

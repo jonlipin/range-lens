@@ -1,5 +1,8 @@
 package-as: RangeLens
 
+ignore:
+  - tools
+
 manual-changelog:
   filename: RELEASE-NOTES.md
   markup-type: markdown
