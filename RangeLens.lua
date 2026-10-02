@@ -83,14 +83,27 @@ local CONE = { ["Cone of Cold"] = true, ["Molten Blast"] = true }
 -- Built-in reach adjustments, in yards, for what actually lands in game where it
 -- differs from the data. Frost Nova's freeze lands short of its 10 yd damage on
 -- WoW Forever (seen in game 2026-09-29: it freezes past 9 yd but not at 10).
--- Players tune these and any other spell in the options; theirs are saved
--- account-wide in RangeLensDB.reach and replace these.
 local DEFAULT_REACH_ADJUST = { ["Frost Nova"] = -1 }
 
 local function ReachAdjust(name)
-    local tuned = RangeLensDB and RangeLensDB.reach and RangeLensDB.reach[name]
-    if tuned ~= nil then return tuned end
     return DEFAULT_REACH_ADJUST[name] or 0
+end
+
+-- A spell the player has unlocked in the options and set by hand: its reach in
+-- yards, shared by all characters (RangeLensDB.override). It replaces both the
+-- game's range check and the radius table for that spell.
+local OVERRIDE_MIN, OVERRIDE_MAX = 1, 50
+local function Override(name)
+    local o = RangeLensDB and RangeLensDB.override
+    return o and name and o[name]
+end
+
+local function SetOverride(name, yards)
+    RangeLensDB.override = RangeLensDB.override or {}
+    if yards then
+        yards = math.max(OVERRIDE_MIN, math.min(OVERRIDE_MAX, math.floor(yards + 0.5)))
+    end
+    RangeLensDB.override[name] = yards
 end
 
 -- How far a self-centred spell does what the icon promises.
@@ -376,6 +389,13 @@ local function ResolveSpells()
                     spell.aoe = AoeReach(name, radius)
                     spell.range = tostring(spell.aoe)
                 end
+            end
+            local manual = Override(name)
+            if manual then
+                spell.aoe = manual
+                spell.range = tostring(manual)
+                spell.minRange, spell.maxRange = nil, nil
+                spell.manual = true
             end
             resolved[#resolved + 1] = spell
         end
@@ -940,21 +960,25 @@ local function ScanSpellBook()
     local function Add(name, id, icon)
         if type(name) ~= "string" or name == "" or seen[name:lower()] then return end
         local ok, ranged = pcall(SpellHasRange, id or name)
-        local range, aoe
+        local range, auto
         if ok and not Truthy(ranged, true) then
             local radius = AoeRadius(name, id)
             if not radius then return end
-            local reach = AoeReach(name, radius)
-            range = reach .. (CONE[name] and " yd cone" or " yd around you")
-            if reach ~= radius then range = range .. " (data " .. radius .. ")" end
-            aoe = true
+            auto = AoeReach(name, radius)
+            range = auto .. (CONE[name] and " yd cone" or " yd around you")
+            if auto ~= radius then range = range .. " (data " .. radius .. ")" end
         else
             local _, _, _, minRange, maxRange = SpellInfo(id or name)
             range = RangeText(minRange, maxRange)
             range = range and (range .. " yd")
+            if type(maxRange) == "number" and not isSecret(maxRange) and maxRange > 0 then
+                auto = math.floor(maxRange + 0.5)
+            end
         end
+        local manual = Override(name)
+        if manual then range = manual .. " yd, set by hand" end
         seen[name:lower()] = true
-        out[#out + 1] = { name = name, icon = icon or QUESTION_ICON, range = range, aoe = aoe }
+        out[#out + 1] = { name = name, icon = icon or QUESTION_ICON, range = range, auto = auto }
     end
 
     local book = C_SpellBook
@@ -1077,9 +1101,10 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
 end
 
 local ROW_H = 26
-local W = 380
+local LEFT_W = 380   -- the settings column
+local W = 800        -- the whole page in the standalone window; the options page uses its full width
 
-local CONTENT_H = 686
+local CONTENT_H = 560
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1112,7 +1137,7 @@ local function BuildContent()
     OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 200, top - 156, RefreshAllPlates)
     local plateNote = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     plateNote:SetPoint("TOPLEFT", 20, top - 182)
-    plateNote:SetPoint("RIGHT", c, "RIGHT", -16, 0)
+    plateNote:SetWidth(LEFT_W - 36)
     plateNote:SetJustifyH("LEFT")
     plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
 
@@ -1123,19 +1148,19 @@ local function BuildContent()
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", 18, top - 310)
+    header:SetPoint("TOPLEFT", LEFT_W + 10, top - 2)
     header:SetText("Spells to range check")
     local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
     hint:SetPoint("RIGHT", c, "RIGHT", -18, 0)
     hint:SetJustifyH("LEFT")
-    hint:SetText("Your spellbook spells that have a range, plus spells that hit around you, with - and + to tune their reach. Icons appear in the order you tick them (the number on the right).")
+    hint:SetText("Your spellbook spells that have a range, plus spells that hit around you. Ticked spells sit at the top in icon order; < and > move one along the row. Unlock a spell to set its reach by hand.")
 
     local area = CreateFrame("Frame", nil, c)
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 358)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -1150,8 +1175,9 @@ local function BuildContent()
     scroll:SetPoint("TOPLEFT", area, "TOPLEFT", 6, -6)
     scroll:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -22, 6)
     local child = CreateFrame("Frame", nil, scroll)
-    local childW = W - 24 - 28
+    local childW = W - LEFT_W - 4 - 12 - 28
     child:SetSize(childW, 1)
+    c.child = child
     scroll:SetScrollChild(child)
     c.rows = {}
 
@@ -1159,42 +1185,121 @@ local function BuildContent()
         local row = c.rows[i]
         if row then return row end
         row = CreateFrame("Button", nil, child)
-        row:SetSize(childW, ROW_H)
-        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW_H)
+        row:SetSize(c.childW or childW, ROW_H)
         local hl = row:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
         hl:SetColorTexture(1, 1, 1, 0.08)
 
         row.check = CreateCheck(row)
-        row.check:SetPoint("LEFT", 2, 0)
+        row.check:SetPoint("TOPLEFT", 2, -1)
         row.icon = CreateIcon(row)
         SizeIcon(row.icon, 20, false)
         row.icon:SetPoint("LEFT", row.check, "RIGHT", 6, 0)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -3)
         row.name:SetPoint("RIGHT", row, "RIGHT", -30, 0)
         row.name:SetJustifyH("LEFT")
+        row.name:SetWordWrap(false)
         row.order = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.order:SetPoint("RIGHT", -6, 0)
+        row.order:SetPoint("TOPRIGHT", -6, -6)
 
-        -- Area spells: nudge the reach a yard at a time.
-        local function Nudge(delta)
-            local name = row.spellName
-            RangeLensDB.reach = RangeLensDB.reach or {}
-            RangeLensDB.reach[name] = ReachAdjust(name) + delta
+        -- < and >: move a tracked spell's icon one place left or right in the row.
+        local function Move(delta)
+            local from = FindEntry(row.spellName)
+            local to = from and from + delta
+            if not (to and to >= 1 and to <= #cdb.spells) then return end
+            cdb.spells[from], cdb.spells[to] = cdb.spells[to], cdb.spells[from]
             FullRefresh()
             RefreshOptions()
         end
-        row.plus = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
-        row.plus:SetSize(20, 18)
-        row.plus:SetPoint("RIGHT", row, "RIGHT", -24, 0)
-        row.plus:SetText("+")
-        row.plus:SetScript("OnClick", function() Nudge(1) end)
-        row.minus = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
-        row.minus:SetSize(20, 18)
-        row.minus:SetPoint("RIGHT", row.plus, "LEFT", -2, 0)
-        row.minus:SetText("-")
-        row.minus:SetScript("OnClick", function() Nudge(-1) end)
+        row.later = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
+        row.later:SetSize(22, 18)
+        row.later:SetPoint("TOPRIGHT", row, "TOPRIGHT", -88, -4)
+        row.later:SetText(">")
+        row.later:SetScript("OnClick", function() Move(1) end)
+        row.earlier = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
+        row.earlier:SetSize(22, 18)
+        row.earlier:SetPoint("RIGHT", row.later, "LEFT", -2, 0)
+        row.earlier:SetText("<")
+        row.earlier:SetScript("OnClick", function() Move(-1) end)
+
+        -- Unlock: set this spell's reach by hand. Lock: back to automatic.
+        row.unlock = TryCreate("Button", nil, row, { "UIPanelButtonTemplate" })
+        row.unlock:SetSize(58, 18)
+        row.unlock:SetPoint("TOPRIGHT", row, "TOPRIGHT", -24, -4)
+        row.unlock:SetScript("OnClick", function()
+            local name = row.spellName
+            if Override(name) then
+                SetOverride(name, nil)
+            else
+                SetOverride(name, row.auto or 10)
+            end
+            FullRefresh()
+            RefreshOptions()
+        end)
+
+        -- The tuner, shown while unlocked: a slider and a box you can type in.
+        row.tuner = CreateFrame("Frame", nil, row)
+        row.tuner:SetPoint("TOPLEFT", row, "TOPLEFT", 34, -ROW_H + 2)
+        row.tuner:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        row.tuner:SetHeight(28)
+        row.tuner:EnableMouse(true) -- clicks here don't tick or untick the spell
+        local sliderName = "RangeLensTuneSlider" .. i
+        local slider = TryCreate("Slider", sliderName, row.tuner, { "MinimalSliderTemplate", "UISliderTemplate", "OptionsSliderTemplate" })
+        for _, suffix in ipairs({ "Low", "High", "Text" }) do
+            local extra = _G[sliderName .. suffix]
+            if extra then extra:SetText("") extra:Hide() end
+        end
+        if slider.SetOrientation then slider:SetOrientation("HORIZONTAL") end
+        slider:SetPoint("LEFT", row.tuner, "LEFT", 0, 0)
+        slider:SetSize(190, 16)
+        slider:SetMinMaxValues(OVERRIDE_MIN, OVERRIDE_MAX)
+        if slider.SetValueStep then slider:SetValueStep(1) end
+        if slider.SetObeyStepOnDrag then pcall(slider.SetObeyStepOnDrag, slider, true) end
+        row.slider = slider
+
+        local box = TryCreate("EditBox", "RangeLensTuneBox" .. i, row.tuner, { "InputBoxTemplate" })
+        box:SetSize(34, 20)
+        box:SetPoint("LEFT", slider, "RIGHT", 14, 0)
+        box:SetAutoFocus(false)
+        box:SetNumeric(true)
+        box:SetMaxLetters(2)
+        box:SetJustifyH("CENTER")
+        if not box:GetFontObject() then box:SetFontObject(ChatFontNormal) end
+        row.box = box
+        local unit = row.tuner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        unit:SetPoint("LEFT", box, "RIGHT", 4, 0)
+        unit:SetText("yd")
+
+        slider:SetScript("OnValueChanged", function(self, v)
+            v = math.floor(v + 0.5)
+            if self.syncing then return end
+            box:SetText(v)
+            SetOverride(row.spellName, v)
+            row.name:SetText(row.label(v))
+            FullRefresh()
+        end)
+        local function Commit(self)
+            local v = tonumber(self:GetText())
+            if v then
+                SetOverride(row.spellName, v)
+                FullRefresh()
+            end
+            self:ClearFocus()
+            RefreshOptions()
+        end
+        box:SetScript("OnEnterPressed", Commit)
+        box:SetScript("OnEditFocusLost", function(self)
+            if not self.committing then
+                self.committing = true
+                Commit(self)
+                self.committing = false
+            end
+        end)
+        box:SetScript("OnEscapePressed", function(self)
+            self:SetText(Override(row.spellName) or "")
+            self:ClearFocus()
+        end)
 
         row.check:SetScript("OnClick", function(self)
             SetTracked(row.spellName, self:GetChecked() and true or false)
@@ -1208,6 +1313,10 @@ local function BuildContent()
 
     function c:Populate()
         local list = ScanSpellBook()
+        -- Tracked spells first, in the order their icons appear; then the rest.
+        for i, item in ipairs(list) do item.sortKey = FindEntry(item.name) or (1000 + i) end
+        table.sort(list, function(a, b) return a.sortKey < b.sortKey end)
+        local y = 0
         for i, item in ipairs(list) do
             local row = Row(i)
             row.spellName = item.name
@@ -1217,23 +1326,50 @@ local function BuildContent()
             local index = FindEntry(item.name)
             row.check:SetChecked(index ~= nil)
             row.icon.range:SetText("")
-            row.name:SetText(item.name
-                .. (item.range and (" |cffaaaaaa" .. item.range .. "|r") or "")
-                .. (item.unknown and " |cff888888(not in spellbook)|r" or ""))
+            local auto = item.auto
+            row.auto = auto
+            row.label = function(manualYards)
+                local range = item.range
+                if manualYards then range = manualYards .. " yd, set by hand" end
+                return item.name
+                    .. (range and (" |cffaaaaaa" .. range .. "|r") or "")
+                    .. (item.unknown and " |cff888888(not in spellbook)|r" or "")
+            end
+            local manual = Override(item.name)
+            row.name:SetText(row.label(manual))
             row.order:SetText(index and tostring(index) or "")
-            row.plus:SetShown(item.aoe and true or false)
-            row.minus:SetShown(item.aoe and true or false)
-            row.name:SetPoint("RIGHT", row, "RIGHT", item.aoe and -70 or -30, 0)
+            local tunable = (auto ~= nil or manual ~= nil) and not item.unknown
+            row.earlier:SetShown(index ~= nil)
+            row.later:SetShown(index ~= nil)
+            row.earlier:SetEnabled(index ~= nil and index > 1)
+            row.later:SetEnabled(index ~= nil and index < #cdb.spells)
+            row.unlock:SetShown(tunable)
+            row.unlock:SetText(manual and "Lock" or "Unlock")
+            row.name:ClearAllPoints()
+            row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -3)
+            row.name:SetPoint("RIGHT", row, "RIGHT", index and -140 or (tunable and -88 or -30), 0)
+            row.tuner:SetShown(manual ~= nil)
+            if manual then
+                row.slider.syncing = true
+                row.slider:SetValue(manual)
+                row.slider.syncing = false
+                if not row.box:HasFocus() then row.box:SetText(manual) end
+            end
+            local height = manual and (ROW_H + 30) or ROW_H
+            row:SetSize(c.childW or childW, height)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, -y)
+            y = y + height
             row:Show()
         end
         for i = #list + 1, #c.rows do c.rows[i]:Hide() end
-        child:SetHeight(math.max(1, #list * ROW_H))
+        child:SetHeight(math.max(1, y))
         c.count:SetText(#cdb.spells .. " tracked")
     end
 
     local defaults = TryCreate("Button", nil, c, { "UIPanelButtonTemplate" })
     defaults:SetSize(120, 22)
-    defaults:SetPoint("BOTTOMLEFT", 14, 6)
+    defaults:SetPoint("BOTTOMLEFT", LEFT_W + 6, 6)
     defaults:SetText("Class defaults")
     defaults:SetScript("OnClick", function()
         local _, class = UnitClass("player")
@@ -1254,6 +1390,14 @@ local function BuildContent()
     c.count = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     c.count:SetPoint("BOTTOMRIGHT", -18, 12)
 
+    function c:Resize(width, height)
+        width = math.max(W, width or W)
+        height = math.max(CONTENT_H, height or CONTENT_H)
+        self:SetSize(width, height)
+        self.childW = width - LEFT_W - 4 - 12 - 28
+        child:SetWidth(self.childW)
+    end
+
     c:SetScript("OnShow", function() RefreshOptions() end)
     return c
 end
@@ -1270,8 +1414,9 @@ local function EnsureContent()
 end
 
 -- Moves the controls into `parent`.
-local function Host(parent, x, y, scale)
+local function Host(parent, x, y, scale, width, height)
     scale = scale or 1
+    content:Resize(width, height)
     content:SetParent(parent)
     content:ClearAllPoints()
     content:SetScale(scale)
@@ -1390,8 +1535,14 @@ local function RegisterOptionsPage()
         if window and window:IsShown() then window:Hide() end
         local w, h = self:GetWidth() or 0, self:GetHeight() or 0
         local scale = 1
-        if w > 0 and h > 0 then scale = math.min(1, (w - 20) / W, (h - 50) / CONTENT_H) end
-        Host(self, 6, -42, scale)
+        if w > 0 and h > 0 then scale = math.min(1, (w - 12) / W, (h - 50) / CONTENT_H) end
+        -- Fill the page: the spell list takes all the width and height left.
+        Host(self, 6, -42, scale, (w - 12) / scale, (h - 50) / scale)
+    end)
+    page:SetScript("OnSizeChanged", function(self)
+        if self:IsVisible() and content and content:GetParent() == self then
+            self:GetScript("OnShow")(self)
+        end
     end)
     local category = Settings.RegisterCanvasLayoutCategory(page, "Range Lens")
     if category then
@@ -1501,7 +1652,7 @@ local HELP = {
     "/rl melee - toggle hiding nameplate icons in melee range",
     "/rl cooldowns - toggle cooldown swipes",
     "/rl inrange - show only the spells that can reach (no red icons)",
-    "/rl reach <spell> <yards> - tune an area spell's reach (+/- from the data); /rl reach <spell> resets it",
+    "/rl reach <spell> <yards> - set a spell's reach by hand; /rl reach <spell> sets it back to automatic",
     "/rl range - toggle the spell range number on icons",
     "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
     "/rl lock | /rl unlock - lock or move the target panel",
@@ -1573,16 +1724,16 @@ local function Slash(msg)
         Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
     elseif cmd == "reach" then
         local text = strtrim(rest or "")
-        local spellName, n = text:match("^(.-)%s+([%+%-]?%d+)$")
+        local spellName, n = text:match("^(.-)%s+(%d+)$")
         spellName = strtrim(spellName or text)
         spellName = SpellInfo(spellName) or spellName -- the game's spelling and case
-        local radius = spellName ~= "" and AoeRadius(spellName, select(3, SpellInfo(spellName)))
-        if not radius then return Print("usage: /rl reach <spell> <yards>, for a spell that hits around you") end
-        RangeLensDB.reach[spellName] = n and tonumber(n) or nil
+        if spellName == "" or not (SpellInfo(spellName) or AOE_RADIUS[spellName]) then
+            return Print("usage: /rl reach <spell> <yards>, or /rl reach <spell> for automatic")
+        end
+        SetOverride(spellName, n and tonumber(n) or nil)
         FullRefresh()
-        local adjust = ReachAdjust(spellName)
-        Print(("%s: data %d yd, checked at %d yd%s"):format(spellName, radius, AoeReach(spellName, radius),
-            adjust ~= 0 and (" (" .. (adjust > 0 and "+" or "") .. adjust .. ")") or ""))
+        local manual = Override(spellName)
+        Print(spellName .. (manual and (": set by hand to " .. manual .. " yd") or ": back to automatic"))
     elseif cmd == "inrange" then
         db.inRangeOnly = not db.inRangeOnly
         FullRefresh()
@@ -1720,7 +1871,17 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     if event == "ADDON_LOADED" then
         if arg1 ~= ADDON_NAME then return end
         RangeLensDB = RangeLensDB or {}
-        RangeLensDB.reach = RangeLensDB.reach or {}
+        RangeLensDB.override = RangeLensDB.override or {}
+        -- 1.6.0 kept +/- tuning as yards from the radius; it is now a reach set by hand.
+        if RangeLensDB.reach then
+            for name, delta in pairs(RangeLensDB.reach) do
+                local radius = AOE_RADIUS[name]
+                if radius and delta ~= (DEFAULT_REACH_ADJUST[name] or 0) and RangeLensDB.override[name] == nil then
+                    RangeLensDB.override[name] = math.max(OVERRIDE_MIN, radius + delta)
+                end
+            end
+            RangeLensDB.reach = nil
+        end
         RangeLensCharDB = RangeLensCharDB or {}
         cdb = RangeLensCharDB
         -- 1.3.0: settings are per character (the folder the game saves

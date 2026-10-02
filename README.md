@@ -9,12 +9,13 @@ Made for WoW Forever (Interface 16001).
 - **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted. Or keep them to your target's nameplate, your focus's, or both, and hide them while a mob is in melee range.
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
 - **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
-- **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want; icons appear in the order you tick them.
+- **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want, and use < and > to put their icons in the order you like.
+- **Tune any spell.** Unlock a spell in the options to set its reach by hand with a slider or by typing the yards.
 - **Range numbers.** Each icon shows the spell's range in yards, both ends for a spell with a minimum range (8-25 for Charge).
 - **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.
 - **Or only what reaches.** Switch on Only show spells in range and an icon appears only while its spell can reach, with no red or orange at all.
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
-- **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Every one can be tuned with - and + in the options (Frost Nova starts 1 yard short, for its freeze), and Arctic Reach is counted.
+- **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Frost Nova starts 1 yard short, for its freeze, Arctic Reach is counted, and any of them can be unlocked and tuned.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
 - **Per character.** Each character keeps its own spells, panel position and settings.
 - **Safe in combat.** It never reads values the game keeps hidden in combat, and it skips the distance checks the game refuses on friendly units in combat.
@@ -41,7 +42,7 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 | `/rl melee` | Toggle hiding nameplate icons in melee range |
 | `/rl cooldowns`, `/rl range` | Toggle the cooldown sweep, the range number on icons |
 | `/rl inrange` | Toggle showing only the spells that can reach |
-| `/rl reach <spell> <yards>` | Tune an area spell's reach, in yards from its radius; without a number, reset it |
+| `/rl reach <spell> <yards>` | Set a spell's reach by hand; without a number, back to automatic |
 | `/rl distance`, `/rl platedistance` | Toggle the distance on the panel, on nameplates |
 | `/rl lock`, `/rl unlock` | Lock the panel, or unlock it to drag |
 | `/rl size <n>`, `/rl panelsize <n>` | Icon sizes |
