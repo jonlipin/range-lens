@@ -714,6 +714,62 @@ local function InMelee(unit)
     return c ~= nil and RunChecker(c, unit) == true
 end
 
+-- The game's own nameplate settings (Options > Nameplates): Size and Style.
+-- Read, never written; reading these does not touch Blizzard's nameplate code.
+local function PlateSettings()
+    local size = tonumber(GetCVar and GetCVar("nameplateSize")) or 2
+    local style = tonumber(GetCVar and GetCVar("nameplateStyle")) or 0
+    return size, style
+end
+
+local function PlateSettingsKey()
+    local size, style = PlateSettings()
+    return style .. ":" .. size
+end
+
+-- Blizzard's horizontal and vertical scale for a Size, per Style (NamePlateConstants).
+local function PlateScale(size, style)
+    local consts = _G.NamePlateConstants
+    local classic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+    local tbl = consts and (classic and consts.NAME_PLATE_SCALES_CLASSIC_STYLE or consts.NAME_PLATE_SCALES)
+    local entry = tbl and (tbl[size] or tbl[2])
+    if type(entry) == "table" then return entry.horizontal or 1, entry.vertical or 1 end
+    return 1, 1
+end
+
+-- Measure a real plate's health bar and our row's scale, in screen pixels,
+-- and save it under the current Size and Style.
+local function MeasurePlate(plate, row, bar)
+    if not (bar and bar ~= plate and RangeLensDB) then return end
+    local ok, w, h = pcall(function() return bar:GetWidth(), bar:GetHeight() end)
+    local okS, barScale = pcall(bar.GetEffectiveScale, bar)
+    local okR, rowScale = pcall(row.GetEffectiveScale, row)
+    if ok and okS and okR and not isSecret(w) and not isSecret(h) and not isSecret(barScale)
+        and type(w) == "number" and w > 20 and type(h) == "number" and h > 2 then
+        RangeLensDB.plateLooks = RangeLensDB.plateLooks or {}
+        RangeLensDB.plateLooks[PlateSettingsKey()] = { w = w * barScale, h = h * barScale, rowScale = rowScale }
+    end
+end
+
+-- The plate to draw in the preview for the current settings: measured if a
+-- real plate has been seen with them, otherwise estimated from a measurement
+-- under other settings (scaled by Blizzard's tables), otherwise from defaults.
+local function PlateLook()
+    local looks = RangeLensDB and RangeLensDB.plateLooks or {}
+    local size, style = PlateSettings()
+    local key = style .. ":" .. size
+    if looks[key] then return looks[key], true end
+    local h1, v1 = PlateScale(size, style)
+    for other, look in pairs(looks) do
+        local oStyle, oSize = other:match("^(%-?%d+):(%-?%d+)$")
+        oStyle, oSize = tonumber(oStyle), tonumber(oSize)
+        local h0, v0 = PlateScale(oSize, oStyle)
+        return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
+    end
+    local ui = UIParent and UIParent:GetEffectiveScale() or 1
+    return { w = 157 * h1 * ui, h = 13 * v1 * ui, rowScale = ui }, false
+end
+
 local function WantsPlate(unit)
     if not db.plates or #resolved == 0 then return false end
     if not PlateAllowed(unit) then return false end
@@ -754,21 +810,8 @@ local function OnPlateAdded(unit)
 
     row:ClearAllPoints()
     row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
-    -- The options preview copies a real plate's size: its health bar and the
-    -- scale our row is drawn at, in screen pixels. Saved, so it holds when no
-    -- plate is in view.
-    local bar = PlateAnchor(plate)
-    if bar ~= plate and RangeLensDB then
-        local ok, w, h = pcall(function() return bar:GetWidth(), bar:GetHeight() end)
-        local okS, barScale = pcall(bar.GetEffectiveScale, bar)
-        local okR, rowScale = pcall(row.GetEffectiveScale, row)
-        if ok and okS and okR and not isSecret(w) and not isSecret(h) and not isSecret(barScale)
-            and type(w) == "number" and w > 20 and type(h) == "number" and h > 2 then
-            local look = RangeLensDB.plateLook or {}
-            look.w, look.h, look.rowScale = w * barScale, h * barScale, rowScale
-            RangeLensDB.plateLook = look
-        end
-    end
+    -- The options preview copies a real plate's size (see MeasurePlate).
+    MeasurePlate(plate, row, PlateAnchor(plate))
     row.unit = unit
     row:Show()
     activePlates[unit] = row
@@ -1311,16 +1354,32 @@ local function BuildContent()
     function c:UpdatePreview()
         -- Real plate size and the scale its icon row is drawn at, measured
         -- from a nameplate in game (see OnPlateAdded); defaults until then.
-        local look = RangeLensDB and RangeLensDB.plateLook
+        local look, measured = PlateLook()
         local pe = preview:GetEffectiveScale() or 1
-        if look and pe > 0 then
-            mockBar:SetSize(look.w / pe, look.h / pe)
-            prow:SetScale(look.rowScale / pe)
-        else
-            mockBar:SetSize(150, 13)
-            prow:SetScale(1)
+        if not (pe and pe > 0) then pe = 1 end
+        mockBar:SetSize(look.w / pe, look.h / pe)
+        prow:SetScale((look.rowScale or pe) / pe)
+        local size, style = PlateSettings()
+        local h = PlateScale(size, style)
+        mockLevel:SetSize(28 * h, 16 * h)
+        -- The Classic style draws the old bar and border; the others the Cooldown Manager bar.
+        local classic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+        if classic ~= c.classicLook then
+            c.classicLook = classic
+            if classic then
+                mockBar:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill")
+                mockFrame:SetTexture("Interface\\Tooltips\\Nameplate-Border")
+                mockFrame:SetTexCoord(0, 1, 0.5, 1)
+            else
+                if HasAtlas("UI-HUD-CoolDownManager-Bar") then mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar") end
+                if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") end
+                mockFrame:SetTexCoord(0, 1, 0, 1)
+            end
+            mockBar:SetVertexColor(0.9, 0.15, 0.1)
         end
-        mockLevel:SetSize(28, 16)
+        previewLabel:SetText("Nameplate preview: drag an icon to reorder.  "
+            .. (measured and "|cff80ff80Matches your nameplate settings.|r"
+                or "|cffffd060Estimated until a nameplate is on screen.|r"))
         LayoutRow(prow, db.plateIconSize, 2, false)
         prow:ClearAllPoints()
         prow:SetPoint("TOP", mockBorder, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
@@ -2061,6 +2120,7 @@ ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 ev:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+ev:RegisterEvent("CVAR_UPDATE")
 pcall(ev.RegisterEvent, ev, "PLAYER_FOCUS_CHANGED")
 ev:RegisterEvent("ADDON_ACTION_BLOCKED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
@@ -2140,6 +2200,19 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "PLAYER_TARGET_CHANGED" then
         if db.plateTargetOnly then RefreshAllPlates() end
         UpdatePanel()
+    elseif event == "CVAR_UPDATE" then
+        -- Size or Style changed in Options > Nameplates: the plates on screen
+        -- are rebuilt by the game, so measure them again a moment later.
+        local name = type(arg1) == "string" and arg1:lower() or ""
+        if name == "nameplatesize" or name == "nameplatestyle" then
+            C_Timer.After(0.3, function()
+                for unit, row in pairs(activePlates) do
+                    local plate = C_NamePlate.GetNamePlateForUnit(unit)
+                    if plate and not plate:IsForbidden() then MeasurePlate(plate, row, PlateAnchor(plate)) end
+                end
+                if previewHook then previewHook() end
+            end)
+        end
     elseif event == "PLAYER_FOCUS_CHANGED" then
         if db.plateFocusOnly then RefreshAllPlates() end
     elseif event == "GET_ITEM_INFO_RECEIVED" then
