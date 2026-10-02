@@ -2,6 +2,11 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.3.0 - 2026-10-01
+
+- Settings are now saved per character: the panel's position, icon sizes, nameplate offsets and every option. The spell list already was. Each character starts from the settings you had before this update, so nothing resets, and from then on changing one character leaves the others alone.
+- Fixed: characters set up with the very first version kept that version's faint out-of-range look (45% strength). It is now full strength, as intended. `/rl dim` still sets it.
+
 ## 1.2.0 - 2026-10-01
 
 - New option, Target's nameplate only: the nameplate icons show under your current target's nameplate and nowhere else. The target panel is unchanged. Also `/rl targetonly`.

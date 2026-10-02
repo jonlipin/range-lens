@@ -300,6 +300,14 @@ local CLASS_DEFAULTS = {
 
 local db, cdb
 
+local function DeepCopy(src)
+    local out = {}
+    for k, v in pairs(src) do
+        out[k] = type(v) == "table" and DeepCopy(v) or v
+    end
+    return out
+end
+
 local function CopyDefaults(src, dst)
     for k, v in pairs(src) do
         if dst[k] == nil then
@@ -1617,7 +1625,18 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         if arg1 ~= ADDON_NAME then return end
         RangeLensDB = RangeLensDB or {}
         RangeLensCharDB = RangeLensCharDB or {}
-        db, cdb = RangeLensDB, RangeLensCharDB
+        cdb = RangeLensCharDB
+        -- 1.3.0: settings are per character (the folder the game saves
+        -- RangeLensCharDB in is per character). A character without its own
+        -- yet starts from the settings shared before, so nothing resets.
+        if not cdb.settings then cdb.settings = DeepCopy(RangeLensDB) end
+        db = cdb.settings
+        -- 1.3.0: the out-of-range look is full strength by default; 0.1.0 saved
+        -- 0.45, which CopyDefaults never replaces.
+        if not db.outAlphaFixed then
+            if db.outAlpha == 0.45 then db.outAlpha = nil end
+            db.outAlphaFixed = true
+        end
         -- 0.3.1 moved the nameplate row down; carry the old default across.
         if not db.offsetMoved then
             if db.plateOffsetY == -2 then db.plateOffsetY = nil end
