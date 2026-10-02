@@ -774,7 +774,14 @@ local function PlateLook()
         local h0, v0 = PlateScale(oSize, oStyle)
         return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
     end
-    return { w = 157 * h1, h = 13 * v1, rowScale = 1 }, false
+    -- Blizzard's own sizes (Blizzard_NamePlates): a 190 wide plate (152 for
+    -- Classic) less the level badge, and the health bar height by style.
+    local styles = Enum and Enum.NamePlateStyle or {}
+    local barH = 13
+    if style == styles.Modern or style == styles.Block or style == styles.HealthFocus then barH = 20
+    elseif style == styles.Classic then barH = 10 end
+    local barW = (style == styles.Classic) and (152 - 24) or (190 - 12)
+    return { w = barW * h1, h = barH * v1, rowScale = 1 }, false
 end
 
 local function WantsPlate(unit)
@@ -1368,8 +1375,13 @@ local function BuildContent()
         if not (pe and pe > 0) then pe = 1 end
         -- The whole mock plate (bar, frame, badge, name, icon row) is drawn at the
         -- real row's scale, so fonts and icons come out the size they are in game.
+        -- Draw at the options window's own scale, the way the game's nameplate
+        -- preview is, whatever scale this page itself is shown at.
         local rowScale = look.rowScale or 1
-        plate:SetScale(rowScale)
+        local ref = (SettingsPanel and SettingsPanel:IsShown() and SettingsPanel) or UIParent
+        local okRef, refScale = pcall(ref.GetEffectiveScale, ref)
+        if not okRef or type(refScale) ~= "number" or refScale <= 0 then refScale = pe end
+        plate:SetScale(rowScale * refScale / pe)
         mockBar:SetSize(look.w / rowScale, look.h / rowScale)
         local size, style = PlateSettings()
         local h = PlateScale(size, style)
