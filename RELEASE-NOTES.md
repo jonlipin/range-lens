@@ -1,3 +1,3 @@
-## 1.10.0 - 2026-10-02
+## 1.10.1 - 2026-10-02
 
-- The nameplate preview follows the game's own nameplate settings (Options > Nameplates). Change Size or Style there and the preview redraws to match, including the Classic style's old bar and border. Range Lens measures a real nameplate under each Size and Style you use; until it has, the preview estimates from Blizzard's own scale tables and says so above the plate.
+- The nameplate position sliders reach further: up / down from -100 to 100 (was -40 to 20) and left / right from -200 to 200 (was -80 to 80). The preview box is taller to show the extra room.

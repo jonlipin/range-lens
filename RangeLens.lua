@@ -1174,7 +1174,7 @@ local ROW_H = 26
 local LEFT_W = 490   -- the settings column
 local W = 920        -- the whole page in the standalone window; the options page uses its full width
 
-local CONTENT_H = 560
+local CONTENT_H = 620
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1213,8 +1213,8 @@ local function BuildContent()
 
     OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 210, 200)
     OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 250, top - 210, 200)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 258, 200)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 250, top - 258, 200)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -100, 100, 20, top - 258, 200)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -200, 200, 250, top - 258, 200)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1231,7 +1231,7 @@ local function BuildContent()
     local preview = CreateFrame("Frame", nil, c)
     preview:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
     preview:SetPoint("RIGHT", c, "RIGHT", -12, 0)
-    preview:SetHeight(130)
+    preview:SetHeight(200)
     if preview.SetClipsChildren then preview:SetClipsChildren(true) end
     local previewBg = preview:CreateTexture(nil, "BACKGROUND")
     previewBg:SetAllPoints()
@@ -1247,7 +1247,7 @@ local function BuildContent()
     local plate = CreateFrame("Frame", nil, preview)
     plate:SetAllPoints()
     local mockBar = plate:CreateTexture(nil, "ARTWORK")
-    mockBar:SetPoint("TOP", preview, "TOP", -16, -40)
+    mockBar:SetPoint("CENTER", preview, "CENTER", -16, 20)
     if HasAtlas("UI-HUD-CoolDownManager-Bar") then
         mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar")
     else
@@ -1422,7 +1422,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 186)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 256)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
