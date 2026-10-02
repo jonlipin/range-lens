@@ -739,13 +739,20 @@ end
 
 -- Measure a real plate's health bar and our row's scale, in screen pixels,
 -- and save it under the current Size and Style.
+-- The game scales each nameplate by distance (smaller far away) and enlarges
+-- your target's, through the nameplate frame's own scale. That is divided
+-- out, so the measurement is the base size whichever plate it comes from.
 local function MeasurePlate(plate, row, bar)
     if not (bar and bar ~= plate and RangeLensDB) then return end
     local ok, w, h = pcall(function() return bar:GetWidth(), bar:GetHeight() end)
     local okS, barScale = pcall(bar.GetEffectiveScale, bar)
     local okR, rowScale = pcall(row.GetEffectiveScale, row)
+    local okP, plateScale = pcall(plate.GetScale, plate)
+    if not okP or isSecret(plateScale) or type(plateScale) ~= "number" or plateScale <= 0 then return end
     if ok and okS and okR and not isSecret(w) and not isSecret(h) and not isSecret(barScale)
+        and not isSecret(rowScale) and type(barScale) == "number" and type(rowScale) == "number"
         and type(w) == "number" and w > 20 and type(h) == "number" and h > 2 then
+        barScale, rowScale = barScale / plateScale, rowScale / plateScale
         RangeLensDB.plateLooks = RangeLensDB.plateLooks or {}
         RangeLensDB.plateLooks[PlateSettingsKey()] = { w = w * barScale, h = h * barScale, rowScale = rowScale }
     end
@@ -2142,6 +2149,12 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         if arg1 ~= ADDON_NAME then return end
         RangeLensDB = RangeLensDB or {}
         RangeLensDB.override = RangeLensDB.override or {}
+        -- 1.10.3: measurements before this included the game's distance and
+        -- target scaling, so they varied from plate to plate; measure again.
+        if not RangeLensDB.plateLooksBase then
+            RangeLensDB.plateLooks, RangeLensDB.plateLook = nil, nil
+            RangeLensDB.plateLooksBase = true
+        end
         -- 1.6.0 kept +/- tuning as yards from the radius; it is now a reach set by hand.
         if RangeLensDB.reach then
             for name, delta in pairs(RangeLensDB.reach) do
