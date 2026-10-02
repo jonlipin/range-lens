@@ -272,6 +272,7 @@ local DEFAULTS = {
     showDistance = true,    -- distance to the target above the panel
     plateDistance = true,   -- distance to each unit beside its nameplate icons
     plateTargetOnly = false, -- nameplate icons only under your target's nameplate
+    plateFocusOnly = false, -- ... or your focus's; both ticked = target and focus
     plateHideMelee = false, -- hide a nameplate's icons while that unit is in melee range
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
@@ -633,14 +634,21 @@ local function PlateAnchor(plate)
     return plate
 end
 
--- Is this nameplate your target's? Comparing the nameplate frames needs no
--- unit comparison, which the game can hide in some places.
-local function IsTargetPlate(unit)
-    local ok, targetPlate = pcall(C_NamePlate.GetNamePlateForUnit, "target")
+-- Is this nameplate the one for `token` ("target" or "focus")? Comparing the
+-- nameplate frames needs no unit comparison, which the game can hide in some places.
+local function IsPlateOf(unit, token)
+    local ok, tokenPlate = pcall(C_NamePlate.GetNamePlateForUnit, token)
     if ok then
-        return targetPlate ~= nil and targetPlate == C_NamePlate.GetNamePlateForUnit(unit)
+        return tokenPlate ~= nil and tokenPlate == C_NamePlate.GetNamePlateForUnit(unit)
     end
-    return Truthy(UnitIsUnit(unit, "target"), false)
+    return Truthy(UnitIsUnit(unit, token), false)
+end
+
+-- With "only on target" and/or "only on focus" ticked, is this nameplate one of them?
+local function PlateAllowed(unit)
+    if not (db.plateTargetOnly or db.plateFocusOnly) then return true end
+    return (db.plateTargetOnly and IsPlateOf(unit, "target"))
+        or (db.plateFocusOnly and IsPlateOf(unit, "focus")) or false
 end
 
 -- In melee range: the 5 yard item check passes.
@@ -651,7 +659,7 @@ end
 
 local function WantsPlate(unit)
     if not db.plates or #resolved == 0 then return false end
-    if db.plateTargetOnly and not IsTargetPlate(unit) then return false end
+    if not PlateAllowed(unit) then return false end
     if Truthy(UnitIsUnit("player", unit), false) then return false end
     if db.enemyOnly then
         return Truthy(UnitCanAttack("player", unit), true)
@@ -1035,7 +1043,7 @@ end
 local ROW_H = 26
 local W = 380
 
-local CONTENT_H = 642
+local CONTENT_H = 660
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1062,17 +1070,23 @@ local function BuildContent()
     OptionCheck(c, "Minimap button", "minimap", 16, top - 78, function() UpdateMinimapButton() end)
     OptionCheck(c, "Distance on panel", "showDistance", 200, top - 78, UpdatePanel)
     OptionCheck(c, "Distance on nameplates", "plateDistance", 16, top - 104, RefreshAllPlates)
-    OptionCheck(c, "Target's nameplate only", "plateTargetOnly", 200, top - 104, RefreshAllPlates)
-    OptionCheck(c, "Hide nameplate icons in melee range", "plateHideMelee", 16, top - 130, RefreshAllPlates)
+    OptionCheck(c, "Hide in melee range", "plateHideMelee", 200, top - 104, RefreshAllPlates)
+    OptionCheck(c, "Only on target's nameplate", "plateTargetOnly", 16, top - 130, RefreshAllPlates)
+    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 200, top - 130, RefreshAllPlates)
+    local plateNote = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    plateNote:SetPoint("TOPLEFT", 20, top - 156)
+    plateNote:SetPoint("RIGHT", c, "RIGHT", -16, 0)
+    plateNote:SetJustifyH("LEFT")
+    plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
 
-    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 166, 160)
-    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 166, 160)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 214, 160)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 214, 160)
+    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 184, 160)
+    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 184, 160)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 232, 160)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 232, 160)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", 18, top - 266)
+    header:SetPoint("TOPLEFT", 18, top - 284)
     header:SetText("Spells to range check")
     local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
@@ -1084,7 +1098,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 314)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 332)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -1424,7 +1438,7 @@ local HELP = {
     "/rl clear | /rl defaults - empty the list or load class defaults",
     "/rl plates | /rl panel - toggle nameplate icons or target panel",
     "/rl enemy - toggle enemies-only on nameplates",
-    "/rl targetonly - toggle icons on your target's nameplate only",
+    "/rl targetonly | /rl focusonly - limit nameplate icons to your target, your focus, or both",
     "/rl melee - toggle hiding nameplate icons in melee range",
     "/rl cooldowns - toggle cooldown swipes",
     "/rl range - toggle the spell range number on icons",
@@ -1496,6 +1510,10 @@ local function Slash(msg)
         db.plateTargetOnly = not db.plateTargetOnly
         RefreshAllPlates()
         Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
+    elseif cmd == "focusonly" then
+        db.plateFocusOnly = not db.plateFocusOnly
+        RefreshAllPlates()
+        Print("focus's nameplate only " .. OnOff(db.plateFocusOnly))
     elseif cmd == "melee" then
         db.plateHideMelee = not db.plateHideMelee
         RefreshAllPlates()
@@ -1610,6 +1628,7 @@ ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 ev:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("PLAYER_TARGET_CHANGED")
+pcall(ev.RegisterEvent, ev, "PLAYER_FOCUS_CHANGED")
 ev:RegisterEvent("ADDON_ACTION_BLOCKED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Talent changes: re-read every spell's range (not every client has every event).
@@ -1677,6 +1696,8 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "PLAYER_TARGET_CHANGED" then
         if db.plateTargetOnly then RefreshAllPlates() end
         UpdatePanel()
+    elseif event == "PLAYER_FOCUS_CHANGED" then
+        if db.plateFocusOnly then RefreshAllPlates() end
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         OnItemLoaded(arg1, arg2)
     elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then

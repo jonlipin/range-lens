@@ -1,4 +1,4 @@
-## 1.3.0 - 2026-10-01
+## 1.4.0 - 2026-10-02
 
-- Settings are now saved per character: the panel's position, icon sizes, nameplate offsets and every option. The spell list already was. Each character starts from the settings you had before this update, so nothing resets, and from then on changing one character leaves the others alone.
-- Fixed: characters set up with the very first version kept that version's faint out-of-range look (45% strength). It is now full strength, as intended. `/rl dim` still sets it.
+- New option, Only on focus's nameplate, next to Only on target's nameplate. Tick one to show the nameplate icons only there, tick both for your target and your focus, or leave both clear for every enemy nameplate. Also `/rl focusonly`.
+- The melee option is now labelled Hide in melee range, and the nameplate options are grouped together with a note on how the two limits combine.
