@@ -1174,7 +1174,7 @@ local ROW_H = 26
 local LEFT_W = 490   -- the settings column
 local W = 920        -- the whole page in the standalone window; the options page uses its full width
 
-local CONTENT_H = 620
+local CONTENT_H = 540
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1189,7 +1189,8 @@ local function BuildContent()
     local c = CreateFrame("Frame")
     c:SetSize(W, CONTENT_H)
     c:Hide()
-    local top = -4
+    local PREVIEW_H = 200
+    local top = -4 - PREVIEW_H - 14 -- everything else sits below the nameplate preview
 
     -- Display settings
     OptionCheck(c, "Nameplate icons", "plates", 16, top, RefreshAllPlates)
@@ -1229,9 +1230,10 @@ local function BuildContent()
     -- Nameplate preview: a mock plate with the icon row as it will look on
     -- real ones. Drag an icon along the row and drop it to reorder.
     local preview = CreateFrame("Frame", nil, c)
-    preview:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
+    -- Across the whole page, so icons moved far left or right stay in view.
+    preview:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -4)
     preview:SetPoint("RIGHT", c, "RIGHT", -12, 0)
-    preview:SetHeight(200)
+    preview:SetHeight(PREVIEW_H)
     if preview.SetClipsChildren then preview:SetClipsChildren(true) end
     local previewBg = preview:CreateTexture(nil, "BACKGROUND")
     previewBg:SetAllPoints()
@@ -1247,7 +1249,7 @@ local function BuildContent()
     local plate = CreateFrame("Frame", nil, preview)
     plate:SetAllPoints()
     local mockBar = plate:CreateTexture(nil, "ARTWORK")
-    mockBar:SetPoint("CENTER", preview, "CENTER", -16, 20)
+    mockBar:SetPoint("CENTER", preview, "CENTER", 0, 20)
     if HasAtlas("UI-HUD-CoolDownManager-Bar") then
         mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar")
     else
@@ -1268,7 +1270,7 @@ local function BuildContent()
     else
         mockLevel:SetColorTexture(0, 0, 0, 0.7)
     end
-    mockLevel:SetPoint("LEFT", mockBar, "RIGHT", 11, -1)
+    mockLevel:SetPoint("LEFT", mockBar, "RIGHT", 4, -1)
     local mockLevelText = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlateLevel and "SystemFont_NamePlateLevel" or "GameFontHighlightSmall")
     mockLevelText:SetPoint("CENTER", mockLevel, "CENTER", 0, 0)
     mockLevelText:SetText("8")
@@ -1277,7 +1279,7 @@ local function BuildContent()
     mockName:SetText("Elder Mottled Boar")
     local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
 
-    local prow = CreateFrame("Frame", nil, preview)
+    local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1357,8 +1359,11 @@ local function BuildContent()
         local look, measured = PlateLook()
         local pe = preview:GetEffectiveScale() or 1
         if not (pe and pe > 0) then pe = 1 end
-        mockBar:SetSize(look.w / pe, look.h / pe)
-        prow:SetScale((look.rowScale or pe) / pe)
+        -- The whole mock plate (bar, frame, badge, name, icon row) is drawn at the
+        -- real row's scale, so fonts and icons come out the size they are in game.
+        local rowScale = look.rowScale or pe
+        plate:SetScale(rowScale / pe)
+        mockBar:SetSize(look.w / rowScale, look.h / rowScale)
         local size, style = PlateSettings()
         local h = PlateScale(size, style)
         mockLevel:SetSize(28 * h, 16 * h)
@@ -1422,7 +1427,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 256)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
