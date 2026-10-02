@@ -273,6 +273,7 @@ local DEFAULTS = {
     plateDistance = true,   -- distance to each unit beside its nameplate icons
     plateTargetOnly = false, -- nameplate icons only under your target's nameplate
     plateFocusOnly = false, -- ... or your focus's; both ticked = target and focus
+    inRangeOnly = false,    -- hide a spell's icon while it can't reach, instead of red
     plateHideMelee = false, -- hide a nameplate's icons while that unit is in melee range
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
@@ -523,6 +524,12 @@ local function ApplyRange(icon, inRange, tooClose)
         else
             icon.lit:SetAlpha(0)
         end
+        -- In range only: the whole icon follows the hidden answer too.
+        if db.inRangeOnly and icon.SetAlphaFromBoolean then
+            icon:SetAlphaFromBoolean(inRange)
+        else
+            icon:SetAlpha(1)
+        end
         return
     end
     if inRange == nil then
@@ -533,6 +540,8 @@ local function ApplyRange(icon, inRange, tooClose)
     icon:Show()
     icon.lit:SetAlpha(inRange and 1 or 0)
     SetLook(icon, inRange and "in" or (tooClose and "close" or "out"))
+    -- In range only: out of reach (too far or too close) means not shown at all.
+    icon:SetAlpha((db.inRangeOnly and not inRange) and 0 or 1)
 end
 
 -- Cooldown swipe from the game's own duration object: the numbers inside it
@@ -826,6 +835,7 @@ local function UpdatePanel()
             for i = 1, panel.row.count or 0 do
                 panel.row.icons[i]:Show()
                 panel.row.icons[i].lit:SetAlpha(1)
+                panel.row.icons[i]:SetAlpha(1)
                 SetLook(panel.row.icons[i], "in")
             end
         end
@@ -1043,7 +1053,7 @@ end
 local ROW_H = 26
 local W = 380
 
-local CONTENT_H = 660
+local CONTENT_H = 686
 
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
@@ -1067,26 +1077,27 @@ local function BuildContent()
     OptionCheck(c, "Lock panel", "locked", 200, top - 26, function() LayoutPanel() UpdatePanel() end)
     OptionCheck(c, "Show cooldowns", "cooldowns", 16, top - 52, RefreshCooldowns)
     OptionCheck(c, "Show spell range", "showRange", 200, top - 52, FullRefresh)
-    OptionCheck(c, "Minimap button", "minimap", 16, top - 78, function() UpdateMinimapButton() end)
-    OptionCheck(c, "Distance on panel", "showDistance", 200, top - 78, UpdatePanel)
-    OptionCheck(c, "Distance on nameplates", "plateDistance", 16, top - 104, RefreshAllPlates)
-    OptionCheck(c, "Hide in melee range", "plateHideMelee", 200, top - 104, RefreshAllPlates)
-    OptionCheck(c, "Only on target's nameplate", "plateTargetOnly", 16, top - 130, RefreshAllPlates)
-    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 200, top - 130, RefreshAllPlates)
+    OptionCheck(c, "Only show spells in range", "inRangeOnly", 16, top - 78, FullRefresh)
+    OptionCheck(c, "Minimap button", "minimap", 200, top - 78, function() UpdateMinimapButton() end)
+    OptionCheck(c, "Distance on panel", "showDistance", 16, top - 104, UpdatePanel)
+    OptionCheck(c, "Distance on nameplates", "plateDistance", 200, top - 104, RefreshAllPlates)
+    OptionCheck(c, "Hide in melee range", "plateHideMelee", 16, top - 130, RefreshAllPlates)
+    OptionCheck(c, "Only on target's nameplate", "plateTargetOnly", 16, top - 156, RefreshAllPlates)
+    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 200, top - 156, RefreshAllPlates)
     local plateNote = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    plateNote:SetPoint("TOPLEFT", 20, top - 156)
+    plateNote:SetPoint("TOPLEFT", 20, top - 182)
     plateNote:SetPoint("RIGHT", c, "RIGHT", -16, 0)
     plateNote:SetJustifyH("LEFT")
     plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
 
-    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 184, 160)
-    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 184, 160)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 232, 160)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 232, 160)
+    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 210, 160)
+    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 210, 160)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 258, 160)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 258, 160)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", 18, top - 284)
+    header:SetPoint("TOPLEFT", 18, top - 310)
     header:SetText("Spells to range check")
     local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
@@ -1098,7 +1109,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 332)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", 12, top - 358)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -1441,6 +1452,7 @@ local HELP = {
     "/rl targetonly | /rl focusonly - limit nameplate icons to your target, your focus, or both",
     "/rl melee - toggle hiding nameplate icons in melee range",
     "/rl cooldowns - toggle cooldown swipes",
+    "/rl inrange - show only the spells that can reach (no red icons)",
     "/rl range - toggle the spell range number on icons",
     "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
     "/rl lock | /rl unlock - lock or move the target panel",
@@ -1510,6 +1522,10 @@ local function Slash(msg)
         db.plateTargetOnly = not db.plateTargetOnly
         RefreshAllPlates()
         Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
+    elseif cmd == "inrange" then
+        db.inRangeOnly = not db.inRangeOnly
+        FullRefresh()
+        Print("only show spells in range " .. OnOff(db.inRangeOnly))
     elseif cmd == "focusonly" then
         db.plateFocusOnly = not db.plateFocusOnly
         RefreshAllPlates()

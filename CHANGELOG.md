@@ -2,6 +2,11 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.5.0 - 2026-10-02
+
+- New option, Only show spells in range: a spell's icon shows only while it can reach, instead of turning red (or orange when too close). Each icon keeps its place, so the row doesn't shift as spells come and go. Works on the nameplates and the target panel. Also `/rl inrange`.
+- The options are regrouped a little to make room for it.
+
 ## 1.4.0 - 2026-10-02
 
 - New option, Only on focus's nameplate, next to Only on target's nameplate. Tick one to show the nameplate icons only there, tick both for your target and your focus, or leave both clear for every enemy nameplate. Also `/rl focusonly`.
