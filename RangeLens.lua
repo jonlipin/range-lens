@@ -754,6 +754,21 @@ local function OnPlateAdded(unit)
 
     row:ClearAllPoints()
     row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+    -- The options preview copies a real plate's size: its health bar and the
+    -- scale our row is drawn at, in screen pixels. Saved, so it holds when no
+    -- plate is in view.
+    local bar = PlateAnchor(plate)
+    if bar ~= plate and RangeLensDB then
+        local ok, w, h = pcall(function() return bar:GetWidth(), bar:GetHeight() end)
+        local okS, barScale = pcall(bar.GetEffectiveScale, bar)
+        local okR, rowScale = pcall(row.GetEffectiveScale, row)
+        if ok and okS and okR and not isSecret(w) and not isSecret(h) and not isSecret(barScale)
+            and type(w) == "number" and w > 20 and type(h) == "number" and h > 2 then
+            local look = RangeLensDB.plateLook or {}
+            look.w, look.h, look.rowScale = w * barScale, h * barScale, rowScale
+            RangeLensDB.plateLook = look
+        end
+    end
     row.unit = unit
     row:Show()
     activePlates[unit] = row
@@ -1113,8 +1128,8 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
 end
 
 local ROW_H = 26
-local LEFT_W = 380   -- the settings column
-local W = 800        -- the whole page in the standalone window; the options page uses its full width
+local LEFT_W = 490   -- the settings column
+local W = 920        -- the whole page in the standalone window; the options page uses its full width
 
 local CONTENT_H = 560
 
@@ -1135,28 +1150,28 @@ local function BuildContent()
 
     -- Display settings
     OptionCheck(c, "Nameplate icons", "plates", 16, top, RefreshAllPlates)
-    OptionCheck(c, "Enemies only", "enemyOnly", 200, top, RefreshAllPlates)
+    OptionCheck(c, "Enemies only", "enemyOnly", 250, top, RefreshAllPlates)
     OptionCheck(c, "Target panel", "panel", 16, top - 26, UpdatePanel)
-    OptionCheck(c, "Lock panel", "locked", 200, top - 26, function() LayoutPanel() UpdatePanel() end)
+    OptionCheck(c, "Lock panel", "locked", 250, top - 26, function() LayoutPanel() UpdatePanel() end)
     OptionCheck(c, "Show cooldowns", "cooldowns", 16, top - 52, RefreshCooldowns)
-    OptionCheck(c, "Show spell range", "showRange", 200, top - 52, FullRefresh)
+    OptionCheck(c, "Show spell range", "showRange", 250, top - 52, FullRefresh)
     OptionCheck(c, "Only show spells in range", "inRangeOnly", 16, top - 78, FullRefresh)
-    OptionCheck(c, "Minimap button", "minimap", 200, top - 78, function() UpdateMinimapButton() end)
+    OptionCheck(c, "Minimap button", "minimap", 250, top - 78, function() UpdateMinimapButton() end)
     OptionCheck(c, "Distance on panel", "showDistance", 16, top - 104, UpdatePanel)
-    OptionCheck(c, "Distance on nameplates", "plateDistance", 200, top - 104, RefreshAllPlates)
+    OptionCheck(c, "Distance on nameplates", "plateDistance", 250, top - 104, RefreshAllPlates)
     OptionCheck(c, "Hide in melee range", "plateHideMelee", 16, top - 130, RefreshAllPlates)
     OptionCheck(c, "Only on target's nameplate", "plateTargetOnly", 16, top - 156, RefreshAllPlates)
-    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 200, top - 156, RefreshAllPlates)
+    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 250, top - 156, RefreshAllPlates)
     local plateNote = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     plateNote:SetPoint("TOPLEFT", 20, top - 182)
     plateNote:SetWidth(LEFT_W - 36)
     plateNote:SetJustifyH("LEFT")
     plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
 
-    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 210, 160)
-    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 200, top - 210, 160)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 258, 160)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 200, top - 258, 160)
+    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 210, 200)
+    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 250, top - 210, 200)
+    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -40, 20, 20, top - 258, 200)
+    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -80, 80, 250, top - 258, 200)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1173,7 +1188,7 @@ local function BuildContent()
     local preview = CreateFrame("Frame", nil, c)
     preview:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
     preview:SetPoint("RIGHT", c, "RIGHT", -12, 0)
-    preview:SetHeight(104)
+    preview:SetHeight(130)
     if preview.SetClipsChildren then preview:SetClipsChildren(true) end
     local previewBg = preview:CreateTexture(nil, "BACKGROUND")
     previewBg:SetAllPoints()
@@ -1182,17 +1197,42 @@ local function BuildContent()
     previewLabel:SetPoint("TOPLEFT", 8, -6)
     previewLabel:SetText("Nameplate preview: drag an icon to reorder")
 
-    local mockName = preview:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    mockName:SetPoint("TOP", preview, "TOP", 0, -22)
-    mockName:SetText("Venomtail Scorpid")
-    local mockBorder = preview:CreateTexture(nil, "BORDER")
-    mockBorder:SetSize(132, 12)
-    mockBorder:SetPoint("TOP", mockName, "BOTTOM", 0, -3)
-    mockBorder:SetColorTexture(0, 0, 0, 0.9)
-    local mockBar = preview:CreateTexture(nil, "ARTWORK")
-    mockBar:SetPoint("TOPLEFT", mockBorder, "TOPLEFT", 1, -1)
-    mockBar:SetPoint("BOTTOMRIGHT", mockBorder, "BOTTOMRIGHT", -1, 1)
-    mockBar:SetColorTexture(0.75, 0.12, 0.1, 1)
+    -- The mock plate is built like the game's own (Blizzard_NamePlates on
+    -- WoW Forever): the Cooldown Manager bar art as the fill, its "Bar-BG"
+    -- plate as the frame (2 left, 3 up, 6 right, 6 down past the bar), and
+    -- the level badge 5 to the right. Default size: a 190 wide plate.
+    local plate = CreateFrame("Frame", nil, preview)
+    plate:SetAllPoints()
+    local mockBar = plate:CreateTexture(nil, "ARTWORK")
+    mockBar:SetPoint("TOP", preview, "TOP", -16, -40)
+    if HasAtlas("UI-HUD-CoolDownManager-Bar") then
+        mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar")
+    else
+        mockBar:SetColorTexture(1, 1, 1, 1)
+    end
+    mockBar:SetVertexColor(0.9, 0.15, 0.1)
+    local mockFrame = plate:CreateTexture(nil, "BACKGROUND")
+    if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then
+        mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG")
+    else
+        mockFrame:SetColorTexture(0, 0, 0, 0.9)
+    end
+    mockFrame:SetPoint("TOPLEFT", mockBar, "TOPLEFT", -2, 3)
+    mockFrame:SetPoint("BOTTOMRIGHT", mockBar, "BOTTOMRIGHT", 6, -6)
+    local mockLevel = plate:CreateTexture(nil, "BACKGROUND")
+    if HasAtlas("ui-hud-nameplates-levelindicator") then
+        mockLevel:SetAtlas("ui-hud-nameplates-levelindicator")
+    else
+        mockLevel:SetColorTexture(0, 0, 0, 0.7)
+    end
+    mockLevel:SetPoint("LEFT", mockBar, "RIGHT", 11, -1)
+    local mockLevelText = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlateLevel and "SystemFont_NamePlateLevel" or "GameFontHighlightSmall")
+    mockLevelText:SetPoint("CENTER", mockLevel, "CENTER", 0, 0)
+    mockLevelText:SetText("8")
+    local mockName = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlate and "SystemFont_NamePlate" or "GameFontHighlightSmall")
+    mockName:SetPoint("BOTTOM", mockBar, "TOP", 0, 4)
+    mockName:SetText("Elder Mottled Boar")
+    local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
 
     local prow = CreateFrame("Frame", nil, preview)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
@@ -1200,13 +1240,54 @@ local function BuildContent()
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     previewEmpty:SetPoint("TOP", mockBorder, "BOTTOM", 0, -10)
 
-    local function DropIcon(icon)
-        icon:StopMovingOrSizing()
+    -- Drop placeholder: an outlined gap where the dragged icon will land.
+    local placeholder = CreateFrame("Frame", nil, prow)
+    placeholder:Hide()
+    local phFill = placeholder:CreateTexture(nil, "BACKGROUND")
+    phFill:SetAllPoints()
+    phFill:SetColorTexture(1, 0.82, 0, 0.15)
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local t = placeholder:CreateTexture(nil, "BORDER")
+        t:SetColorTexture(1, 0.82, 0, 0.9)
+        if side == "TOP" or side == "BOTTOM" then
+            t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1)
+        else
+            t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
+        end
+    end
+
+    local function DragSlot(icon)
         local cx, left = icon:GetCenter(), prow:GetLeft()
-        local step = db.plateIconSize + 2
-        if cx and left and icon.spell then
-            local slot = math.floor((cx - left) / step) + 1
-            slot = math.max(1, math.min(prow.count or 1, slot))
+        if not (cx and left) then return nil end
+        local slot = math.floor((cx - left) / (db.plateIconSize + 2)) + 1
+        return math.max(1, math.min(prow.count or 1, slot))
+    end
+
+    -- Lay the other icons out around a gap at `slot`, with the placeholder in it.
+    local function ShowGap(dragged, slot)
+        local size, step = db.plateIconSize, db.plateIconSize + 2
+        local k = 0
+        for i = 1, prow.count or 0 do
+            local icon = prow.icons[i]
+            if icon ~= dragged then
+                k = k + 1
+                if k == slot then k = k + 1 end
+                icon:ClearAllPoints()
+                icon:SetPoint("LEFT", prow, "LEFT", (k - 1) * step, 0)
+            end
+        end
+        placeholder:SetSize(size, size)
+        placeholder:ClearAllPoints()
+        placeholder:SetPoint("LEFT", prow, "LEFT", (slot - 1) * step, 0)
+        placeholder:Show()
+    end
+
+    local function DropIcon(icon)
+        prow:SetScript("OnUpdate", nil)
+        placeholder:Hide()
+        icon:StopMovingOrSizing()
+        local slot = DragSlot(icon)
+        if slot and icon.spell then
             local target = resolved[slot]
             if target then MoveSpell(icon.spell.query, target.query) end
         end
@@ -1214,7 +1295,32 @@ local function BuildContent()
         RefreshOptions()
     end
 
+    local function StartDrag(icon)
+        icon:SetFrameLevel(prow:GetFrameLevel() + 20)
+        icon:StartMoving()
+        local last
+        prow:SetScript("OnUpdate", function()
+            local slot = DragSlot(icon)
+            if slot and slot ~= last then
+                last = slot
+                ShowGap(icon, slot)
+            end
+        end)
+    end
+
     function c:UpdatePreview()
+        -- Real plate size and the scale its icon row is drawn at, measured
+        -- from a nameplate in game (see OnPlateAdded); defaults until then.
+        local look = RangeLensDB and RangeLensDB.plateLook
+        local pe = preview:GetEffectiveScale() or 1
+        if look and pe > 0 then
+            mockBar:SetSize(look.w / pe, look.h / pe)
+            prow:SetScale(look.rowScale / pe)
+        else
+            mockBar:SetSize(150, 13)
+            prow:SetScale(1)
+        end
+        mockLevel:SetSize(28, 16)
         LayoutRow(prow, db.plateIconSize, 2, false)
         prow:ClearAllPoints()
         prow:SetPoint("TOP", mockBorder, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
@@ -1229,10 +1335,7 @@ local function BuildContent()
                 icon:EnableMouse(true)
                 icon:SetMovable(true)
                 icon:RegisterForDrag("LeftButton")
-                icon:SetScript("OnDragStart", function(self)
-                    self:SetFrameLevel(prow:GetFrameLevel() + 20)
-                    self:StartMoving()
-                end)
+                icon:SetScript("OnDragStart", StartDrag)
                 icon:SetScript("OnDragStop", DropIcon)
                 icon:SetScript("OnEnter", function(self)
                     if not self.spell then return end
@@ -1260,7 +1363,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 160)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 186)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
