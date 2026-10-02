@@ -10,6 +10,7 @@ Made for WoW Forever (Interface 16001).
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
 - **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want, and use < and > to put their icons in the order you like.
+- **See it before you play.** The options show a nameplate preview that redraws as you change settings; drag its icons to reorder them.
 - **Tune any spell.** Unlock a spell in the options to set its reach by hand with a slider or by typing the yards.
 - **Range numbers.** Each icon shows the spell's range in yards, both ends for a spell with a minimum range (8-25 for Charge).
 - **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.

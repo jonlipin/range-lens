@@ -1027,6 +1027,14 @@ local function ScanSpellBook()
     return out
 end
 
+-- Move a tracked spell to where another one is in the list (drag and drop).
+local function MoveSpell(fromName, toName)
+    local from, to = FindEntry(fromName), FindEntry(toName)
+    if not (from and to) or from == to then return end
+    local entry = tremove(cdb.spells, from)
+    tinsert(cdb.spells, to, entry)
+end
+
 local function SetTracked(name, on)
     local i = FindEntry(name)
     if on and not i then
@@ -1048,12 +1056,15 @@ local function CreateCheck(parent, label)
     return cb
 end
 
+local previewHook -- set by the options page: redraws the nameplate preview
+
 local function OptionCheck(parent, label, key, x, y, after)
     local cb = CreateCheck(parent, label)
     cb:SetPoint("TOPLEFT", x, y)
     cb:SetScript("OnClick", function(self)
         db[key] = self:GetChecked() and true or false
         if after then after() end
+        if previewHook then previewHook() end
     end)
     optionRefreshers[#optionRefreshers + 1] = function() cb:SetChecked(db[key] and true or false) end
     return cb
@@ -1091,6 +1102,7 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
         if self.syncing then return end
         db[key] = v
         FullRefresh()
+        if previewHook then previewHook() end
     end)
     optionRefreshers[#optionRefreshers + 1] = function()
         slider.syncing = true
@@ -1156,11 +1168,99 @@ local function BuildContent()
     hint:SetJustifyH("LEFT")
     hint:SetText("Your spellbook spells that have a range, plus spells that hit around you. Ticked spells sit at the top in icon order; < and > move one along the row. Unlock a spell to set its reach by hand.")
 
+    -- Nameplate preview: a mock plate with the icon row as it will look on
+    -- real ones. Drag an icon along the row and drop it to reorder.
+    local preview = CreateFrame("Frame", nil, c)
+    preview:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
+    preview:SetPoint("RIGHT", c, "RIGHT", -12, 0)
+    preview:SetHeight(104)
+    if preview.SetClipsChildren then preview:SetClipsChildren(true) end
+    local previewBg = preview:CreateTexture(nil, "BACKGROUND")
+    previewBg:SetAllPoints()
+    previewBg:SetColorTexture(0.12, 0.1, 0.08, 0.6)
+    local previewLabel = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    previewLabel:SetPoint("TOPLEFT", 8, -6)
+    previewLabel:SetText("Nameplate preview: drag an icon to reorder")
+
+    local mockName = preview:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    mockName:SetPoint("TOP", preview, "TOP", 0, -22)
+    mockName:SetText("Venomtail Scorpid")
+    local mockBorder = preview:CreateTexture(nil, "BORDER")
+    mockBorder:SetSize(132, 12)
+    mockBorder:SetPoint("TOP", mockName, "BOTTOM", 0, -3)
+    mockBorder:SetColorTexture(0, 0, 0, 0.9)
+    local mockBar = preview:CreateTexture(nil, "ARTWORK")
+    mockBar:SetPoint("TOPLEFT", mockBorder, "TOPLEFT", 1, -1)
+    mockBar:SetPoint("BOTTOMRIGHT", mockBorder, "BOTTOMRIGHT", -1, 1)
+    mockBar:SetColorTexture(0.75, 0.12, 0.1, 1)
+
+    local prow = CreateFrame("Frame", nil, preview)
+    prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
+    local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    previewEmpty:SetPoint("TOP", mockBorder, "BOTTOM", 0, -10)
+
+    local function DropIcon(icon)
+        icon:StopMovingOrSizing()
+        local cx, left = icon:GetCenter(), prow:GetLeft()
+        local step = db.plateIconSize + 2
+        if cx and left and icon.spell then
+            local slot = math.floor((cx - left) / step) + 1
+            slot = math.max(1, math.min(prow.count or 1, slot))
+            local target = resolved[slot]
+            if target then MoveSpell(icon.spell.query, target.query) end
+        end
+        FullRefresh()
+        RefreshOptions()
+    end
+
+    function c:UpdatePreview()
+        LayoutRow(prow, db.plateIconSize, 2, false)
+        prow:ClearAllPoints()
+        prow:SetPoint("TOP", mockBorder, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+        for i = 1, prow.count or 0 do
+            local icon = prow.icons[i]
+            icon:Show()
+            icon:SetAlpha(1)
+            icon.lit:SetAlpha(1)
+            SetLook(icon, "in")
+            if not icon.draggable then
+                icon.draggable = true
+                icon:EnableMouse(true)
+                icon:SetMovable(true)
+                icon:RegisterForDrag("LeftButton")
+                icon:SetScript("OnDragStart", function(self)
+                    self:SetFrameLevel(prow:GetFrameLevel() + 20)
+                    self:StartMoving()
+                end)
+                icon:SetScript("OnDragStop", DropIcon)
+                icon:SetScript("OnEnter", function(self)
+                    if not self.spell then return end
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    GameTooltip:SetText(self.spell.query, 1, 1, 1)
+                    GameTooltip:AddLine("Drag to reorder", 0.7, 0.7, 0.7)
+                    GameTooltip:Show()
+                end)
+                icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
+        end
+        prow.distance:SetText(db.plateDistance and "10-15" or "")
+        prow:SetShown(db.plates and (prow.count or 0) > 0)
+        if not db.plates then
+            previewEmpty:SetText("Nameplate icons are switched off.")
+        elseif (prow.count or 0) == 0 then
+            previewEmpty:SetText("Tick spells below to see them here.")
+        else
+            previewEmpty:SetText("")
+        end
+    end
+    previewHook = function() if c:IsVisible() then c:UpdatePreview() end end
+
     local area = CreateFrame("Frame", nil, c)
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 160)
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -1278,6 +1378,7 @@ local function BuildContent()
             SetOverride(row.spellName, v)
             row.name:SetText(row.label(v))
             FullRefresh()
+            if previewHook then previewHook() end
         end)
         local function Commit(self)
             local v = tonumber(self:GetText())
@@ -1486,6 +1587,7 @@ RefreshOptions = function()
     if not (content and content:IsVisible()) then return end
     for _, refresh in ipairs(optionRefreshers) do refresh() end
     content:Populate()
+    content:UpdatePreview()
 end
 
 -- Opens Options > AddOns > RangeLens, the way Shard Grid's minimap button does.
