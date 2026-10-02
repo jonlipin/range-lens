@@ -1189,7 +1189,7 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
 end
 
 local ROW_H = 26
-local LEFT_W = 490   -- the settings column
+local LEFT_W = 300   -- the settings column (one column, scrolls)
 local W = 920        -- the whole page in the standalone window; the options page uses its full width
 
 local CONTENT_H = 540
@@ -1210,30 +1210,68 @@ local function BuildContent()
     local PREVIEW_H = 200
     local top = -4 - PREVIEW_H - 14 -- everything else sits below the nameplate preview
 
-    -- Display settings
-    OptionCheck(c, "Nameplate icons", "plates", 16, top, RefreshAllPlates)
-    OptionCheck(c, "Enemies only", "enemyOnly", 250, top, RefreshAllPlates)
-    OptionCheck(c, "Target panel", "panel", 16, top - 26, UpdatePanel)
-    OptionCheck(c, "Lock panel", "locked", 250, top - 26, function() LayoutPanel() UpdatePanel() end)
-    OptionCheck(c, "Show cooldowns", "cooldowns", 16, top - 52, RefreshCooldowns)
-    OptionCheck(c, "Show spell range", "showRange", 250, top - 52, FullRefresh)
-    OptionCheck(c, "Only show spells in range", "inRangeOnly", 16, top - 78, FullRefresh)
-    OptionCheck(c, "Minimap button", "minimap", 250, top - 78, function() UpdateMinimapButton() end)
-    OptionCheck(c, "Distance on panel", "showDistance", 16, top - 104, UpdatePanel)
-    OptionCheck(c, "Distance on nameplates", "plateDistance", 250, top - 104, RefreshAllPlates)
-    OptionCheck(c, "Hide in melee range", "plateHideMelee", 16, top - 130, RefreshAllPlates)
-    OptionCheck(c, "Only on target's nameplate", "plateTargetOnly", 16, top - 156, RefreshAllPlates)
-    OptionCheck(c, "Only on focus's nameplate", "plateFocusOnly", 250, top - 156, RefreshAllPlates)
-    local plateNote = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    plateNote:SetPoint("TOPLEFT", 20, top - 182)
-    plateNote:SetWidth(LEFT_W - 36)
+    -- Settings: one column with its own scroll bar, so the spell list gets the width.
+    local leftOk, leftScroll = pcall(CreateFrame, "ScrollFrame", "RangeLensSettingsScroll", c, "RangeLensScrollFrameTemplate")
+    if not (leftOk and leftScroll) then
+        leftScroll = CreateFrame("ScrollFrame", "RangeLensSettingsScroll", c)
+        leftScroll:EnableMouseWheel(true)
+        leftScroll:SetScript("OnMouseWheel", function(self, delta)
+            local range = self:GetVerticalScrollRange() or 0
+            self:SetVerticalScroll(math.max(0, math.min(range, self:GetVerticalScroll() - delta * 40)))
+        end)
+    end
+    leftScroll:SetPoint("TOPLEFT", c, "TOPLEFT", 0, top)
+    leftScroll:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 0, 6)
+    leftScroll:SetWidth(LEFT_W - 24)
+    local left = CreateFrame("Frame", nil, leftScroll)
+    left:SetSize(LEFT_W - 24, 1)
+    leftScroll:SetScrollChild(left)
+
+    local y = -2
+    local function Heading(text)
+        local h = left:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        h:SetPoint("TOPLEFT", 14, y - 4)
+        h:SetText(text)
+        y = y - 26
+    end
+    local function Check(label, key, after)
+        OptionCheck(left, label, key, 16, y, after)
+        y = y - 26
+    end
+    local function Slider(label, key, minV, maxV)
+        OptionSlider(left, label, key, minV, maxV, 20, y - 4, LEFT_W - 70)
+        y = y - 50
+    end
+
+    Heading("Icons")
+    Check("Nameplate icons", "plates", RefreshAllPlates)
+    Check("Target panel", "panel", UpdatePanel)
+    Check("Lock panel", "locked", function() LayoutPanel() UpdatePanel() end)
+    Check("Show cooldowns", "cooldowns", RefreshCooldowns)
+    Check("Show spell range", "showRange", FullRefresh)
+    Check("Only show spells in range", "inRangeOnly", FullRefresh)
+    Check("Distance on panel", "showDistance", UpdatePanel)
+    Check("Distance on nameplates", "plateDistance", RefreshAllPlates)
+    Check("Minimap button", "minimap", function() UpdateMinimapButton() end)
+
+    Heading("Which nameplates")
+    Check("Enemies only", "enemyOnly", RefreshAllPlates)
+    Check("Hide in melee range", "plateHideMelee", RefreshAllPlates)
+    Check("Only on target's nameplate", "plateTargetOnly", RefreshAllPlates)
+    Check("Only on focus's nameplate", "plateFocusOnly", RefreshAllPlates)
+    local plateNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    plateNote:SetPoint("TOPLEFT", 20, y)
+    plateNote:SetWidth(LEFT_W - 60)
     plateNote:SetJustifyH("LEFT")
     plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
+    y = y - 34
 
-    OptionSlider(c, "Panel icon size", "panelIconSize", 16, 80, 20, top - 210, 200)
-    OptionSlider(c, "Nameplate icon size", "plateIconSize", 8, 40, 250, top - 210, 200)
-    OptionSlider(c, "Nameplate up / down", "plateOffsetY", -100, 100, 20, top - 258, 200)
-    OptionSlider(c, "Nameplate left / right", "plateOffsetX", -200, 200, 250, top - 258, 200)
+    Heading("Size and position")
+    Slider("Panel icon size", "panelIconSize", 16, 80)
+    Slider("Nameplate icon size", "plateIconSize", 8, 40)
+    Slider("Nameplate up / down", "plateOffsetY", -100, 100)
+    Slider("Nameplate left / right", "plateOffsetX", -200, 200)
+    left:SetHeight(-y + 8)
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
