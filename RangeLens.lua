@@ -737,17 +737,18 @@ local function PlateScale(size, style)
     return 1, 1
 end
 
--- Measure a real plate's health bar and our row's scale, in screen pixels,
--- and save it under the current Size and Style.
--- The game scales each nameplate by distance (smaller far away) and enlarges
--- your target's, through the nameplate frame's own scale. That is divided
--- out, so the measurement is the base size whichever plate it comes from.
+-- Measure a real plate's health bar and our row's scale, relative to the
+-- nameplate frame itself, and save it under the current Size and Style.
+-- The game scales each nameplate frame by distance (smaller far away) and
+-- enlarges your target's; measuring relative to the frame leaves that out.
+-- Drawn in the options at these sizes, the preview comes out the size the
+-- game's own nameplate preview shows.
 local function MeasurePlate(plate, row, bar)
     if not (bar and bar ~= plate and RangeLensDB) then return end
     local ok, w, h = pcall(function() return bar:GetWidth(), bar:GetHeight() end)
     local okS, barScale = pcall(bar.GetEffectiveScale, bar)
     local okR, rowScale = pcall(row.GetEffectiveScale, row)
-    local okP, plateScale = pcall(plate.GetScale, plate)
+    local okP, plateScale = pcall(plate.GetEffectiveScale, plate)
     if not okP or isSecret(plateScale) or type(plateScale) ~= "number" or plateScale <= 0 then return end
     if ok and okS and okR and not isSecret(w) and not isSecret(h) and not isSecret(barScale)
         and not isSecret(rowScale) and type(barScale) == "number" and type(rowScale) == "number"
@@ -773,8 +774,7 @@ local function PlateLook()
         local h0, v0 = PlateScale(oSize, oStyle)
         return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
     end
-    local ui = UIParent and UIParent:GetEffectiveScale() or 1
-    return { w = 157 * h1 * ui, h = 13 * v1 * ui, rowScale = ui }, false
+    return { w = 157 * h1, h = 13 * v1, rowScale = 1 }, false
 end
 
 local function WantsPlate(unit)
@@ -1256,7 +1256,7 @@ local function BuildContent()
     local plate = CreateFrame("Frame", nil, preview)
     plate:SetAllPoints()
     local mockBar = plate:CreateTexture(nil, "ARTWORK")
-    mockBar:SetPoint("CENTER", preview, "CENTER", 0, 20)
+    mockBar:SetPoint("CENTER", preview, "CENTER", 0, 0)
     if HasAtlas("UI-HUD-CoolDownManager-Bar") then
         mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar")
     else
@@ -1368,8 +1368,8 @@ local function BuildContent()
         if not (pe and pe > 0) then pe = 1 end
         -- The whole mock plate (bar, frame, badge, name, icon row) is drawn at the
         -- real row's scale, so fonts and icons come out the size they are in game.
-        local rowScale = look.rowScale or pe
-        plate:SetScale(rowScale / pe)
+        local rowScale = look.rowScale or 1
+        plate:SetScale(rowScale)
         mockBar:SetSize(look.w / rowScale, look.h / rowScale)
         local size, style = PlateSettings()
         local h = PlateScale(size, style)
@@ -2149,11 +2149,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         if arg1 ~= ADDON_NAME then return end
         RangeLensDB = RangeLensDB or {}
         RangeLensDB.override = RangeLensDB.override or {}
-        -- 1.10.3: measurements before this included the game's distance and
-        -- target scaling, so they varied from plate to plate; measure again.
-        if not RangeLensDB.plateLooksBase then
+        -- 1.10.4: earlier measurements were in screen pixels and varied with the
+        -- game's distance and target scaling; measure again, relative to the plate.
+        if RangeLensDB.plateLooksBase ~= 2 then
             RangeLensDB.plateLooks, RangeLensDB.plateLook = nil, nil
-            RangeLensDB.plateLooksBase = true
+            RangeLensDB.plateLooksBase = 2
         end
         -- 1.6.0 kept +/- tuning as yards from the radius; it is now a reach set by hand.
         if RangeLensDB.reach then
