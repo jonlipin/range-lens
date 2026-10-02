@@ -1157,8 +1157,14 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
     local caption = holder:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     caption:SetPoint("TOPLEFT", 0, 0)
     caption:SetText(label)
-    local value = holder:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    value:SetPoint("TOPRIGHT", 0, -1)
+    -- The value is a box you can type in (negative numbers too); Enter applies it.
+    local value = TryCreate("EditBox", name .. "Value", holder, { "InputBoxTemplate" })
+    value:SetSize(44, 18)
+    value:SetPoint("TOPRIGHT", -2, 2)
+    value:SetAutoFocus(false)
+    value:SetMaxLetters(4)
+    value:SetJustifyH("CENTER")
+    if not value:GetFontObject() then value:SetFontObject(ChatFontNormal) end
 
     local slider = TryCreate("Slider", name, holder, { "MinimalSliderTemplate", "UISliderTemplate", "OptionsSliderTemplate" })
     for _, suffix in ipairs({ "Low", "High", "Text" }) do
@@ -1180,11 +1186,38 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
         FullRefresh()
         if previewHook then previewHook() end
     end)
+    local committing = false
+    local function Commit(self)
+        if committing then return end
+        committing = true
+        local v = tonumber(self:GetText())
+        if v then
+            v = math.max(minV, math.min(maxV, math.floor(v + 0.5)))
+            db[key] = v
+            slider.syncing = true
+            slider:SetValue(v)
+            slider.syncing = false
+            FullRefresh()
+            if previewHook then previewHook() end
+        end
+        self:SetText(db[key])
+        self:ClearFocus()
+        committing = false
+    end
+    value:SetScript("OnEnterPressed", Commit)
+    value:SetScript("OnEditFocusLost", Commit)
+    value:SetScript("OnEscapePressed", function(self)
+        committing = true
+        self:SetText(db[key])
+        self:ClearFocus()
+        committing = false
+    end)
+
     optionRefreshers[#optionRefreshers + 1] = function()
         slider.syncing = true
         slider:SetValue(db[key])
         slider.syncing = false
-        value:SetText(db[key])
+        if not value:HasFocus() then value:SetText(db[key]) end
     end
 end
 

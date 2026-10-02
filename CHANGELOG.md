@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.11.1 - 2026-10-02
+
+- Type exact values: the number beside each size and position slider is now a box you can type in, negative numbers included. Press Enter (or click away) to apply it, and the slider moves to match. Typed values are kept inside the slider's range.
+
 ## 1.11.0 - 2026-10-02
 
 - The settings are one column now, grouped under Icons, Which nameplates and Size and position, with their own scroll bar. The spell list gets the freed width, so long entries such as "Frost Nova 9 yd around you (data 10)" are readable in full.
