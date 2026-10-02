@@ -83,7 +83,9 @@ local CONE = { ["Cone of Cold"] = true, ["Molten Blast"] = true }
 -- Built-in reach adjustments, in yards, for what actually lands in game where it
 -- differs from the data. Frost Nova's freeze lands short of its 10 yd damage on
 -- WoW Forever (seen in game 2026-09-29: it freezes past 9 yd but not at 10).
-local DEFAULT_REACH_ADJUST = { ["Frost Nova"] = -1 }
+-- Arcane Explosion reaches about 9.5 yd standing still (seen in game
+-- 2026-10-02), so it is checked at 9.
+local DEFAULT_REACH_ADJUST = { ["Frost Nova"] = -1, ["Arcane Explosion"] = -1 }
 
 local function ReachAdjust(name)
     return DEFAULT_REACH_ADJUST[name] or 0

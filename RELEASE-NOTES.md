@@ -1,3 +1,3 @@
-## 1.10.7 - 2026-10-02
+## 1.10.8 - 2026-10-02
 
-- Fixed: the preview's mob name and level number stayed the same size when you changed the game's nameplate Size. They now grow and shrink with it, by the same rule the game uses for its own nameplates.
+- Arcane Explosion reaches about 9.5 yards standing still on WoW Forever, short of the 10 in its spell data, so its icon lit a little early. It is now checked at 9 yards, like Frost Nova, and its options label reads "9 yd around you (data 10)". Unlock it to set a different reach.
