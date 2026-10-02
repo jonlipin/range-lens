@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.10.7 - 2026-10-02
+
+- Fixed: the preview's mob name and level number stayed the same size when you changed the game's nameplate Size. They now grow and shrink with it, by the same rule the game uses for its own nameplates.
+
 ## 1.10.6 - 2026-10-02
 
 - Fixed: before a real nameplate had been measured, the preview's health bar came out too wide. The estimate now uses the bar's own width (130 at Medium size) rather than the whole plate's, which also holds the level badge, so it matches the game's own nameplate preview.

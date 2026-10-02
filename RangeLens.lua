@@ -1291,7 +1291,7 @@ local function BuildContent()
     mockLevelText:SetPoint("CENTER", mockLevel, "CENTER", 0, 0)
     mockLevelText:SetText("8")
     local mockName = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlate and "SystemFont_NamePlate" or "GameFontHighlightSmall")
-    mockName:SetPoint("BOTTOM", mockBar, "TOP", 0, 4)
+    mockName:SetPoint("BOTTOM", mockBar, "TOP", 0, 2)
     mockName:SetText("Elder Mottled Boar")
     local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
 
@@ -1386,8 +1386,13 @@ local function BuildContent()
         plate:SetScale(rowScale * refScale / pe)
         mockBar:SetSize(look.w / rowScale, look.h / rowScale)
         local size, style = PlateSettings()
-        local h = PlateScale(size, style)
+        local h, v = PlateScale(size, style)
         mockLevel:SetSize(28 * h, 16 * h)
+        -- Font sizes follow the Size setting, as Blizzard_NamePlates sets them:
+        -- the name at 14 (10 for Classic) and the level at 10, times the vertical scale.
+        local isClassic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+        if mockName.SetTextHeight then mockName:SetTextHeight((isClassic and 10 or 14) * v) end
+        if mockLevelText.SetTextHeight then mockLevelText:SetTextHeight(10 * v) end
         -- The Classic style draws the old bar and border; the others the Cooldown Manager bar.
         local classic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
         if classic ~= c.classicLook then
