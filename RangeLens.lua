@@ -774,13 +774,15 @@ local function PlateLook()
         local h0, v0 = PlateScale(oSize, oStyle)
         return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
     end
-    -- Blizzard's own sizes (Blizzard_NamePlates): a 190 wide plate (152 for
-    -- Classic) less the level badge, and the health bar height by style.
+    -- Blizzard's own sizes (Blizzard_NamePlates): the 190 wide plate holds the
+    -- level badge and its gaps, leaving a 130 wide health bar at Medium (checked
+    -- against the game's own preview); Classic insets its 152 plate by 24.25.
+    -- The health bar height is by style.
     local styles = Enum and Enum.NamePlateStyle or {}
     local barH = 13
     if style == styles.Modern or style == styles.Block or style == styles.HealthFocus then barH = 20
     elseif style == styles.Classic then barH = 10 end
-    local barW = (style == styles.Classic) and (152 - 24) or (190 - 12)
+    local barW = (style == styles.Classic) and (152 - 24.25) or 130
     return { w = barW * h1, h = barH * v1, rowScale = 1 }, false
 end
 

@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.10.6 - 2026-10-02
+
+- Fixed: before a real nameplate had been measured, the preview's health bar came out too wide. The estimate now uses the bar's own width (130 at Medium size) rather than the whole plate's, which also holds the level badge, so it matches the game's own nameplate preview.
+
 ## 1.10.5 - 2026-10-02
 
 - Fixed: the nameplate preview came out too small. It is now drawn at the options window's own scale, like the game's nameplate preview, instead of shrinking with the Range Lens page when that page is scaled to fit. Before a real nameplate has been measured, its size now comes from Blizzard's own nameplate sizes for your Size and Style.
