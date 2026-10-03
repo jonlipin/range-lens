@@ -255,8 +255,8 @@ end
 -- Distance text, as the player chose to format it.
 local DIST_FORMATS = { "range", "max", "less", "mid" }
 local DIST_FORMAT_LABEL = { range = "8-12", max = "12", less = "<12", mid = "~10" }
-local DIST_POSITIONS = { "right", "below", "above" }
-local DIST_POSITION_LABEL = { right = "Right of icons", below = "Below icons", above = "Above icons" }
+local DIST_POSITIONS = { "right", "left", "below", "above" }
+local DIST_POSITION_LABEL = { right = "Right of icons", left = "Left of icons", below = "Below icons", above = "Above icons" }
 local DIST_COLORS = { "white", "gold", "grey", "blue" }
 local DIST_COLOR_LABEL = { white = "White", gold = "Gold", grey = "Grey", blue = "Light blue" }
 local DIST_COLOR_RGB = { white = { 1, 1, 1 }, gold = { 1, 0.82, 0 }, grey = { 0.7, 0.7, 0.7 }, blue = { 0.45, 0.75, 1 } }
@@ -293,6 +293,8 @@ local function StyleDistance(fs, anchor)
         fs:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
     elseif pos == "above" then
         fs:SetPoint("BOTTOM", anchor, "TOP", 0, 2)
+    elseif pos == "left" then
+        fs:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
     else
         fs:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
     end
@@ -376,7 +378,7 @@ local DEFAULTS = {
     plateHideMelee = false, -- hide a nameplate's icons while that unit is in melee range
     distanceFormat = "range",   -- distance text: "range" 8-12, "max" 12, "less" <12, "mid" ~10
     distanceYd = false,         -- add " yd"
-    distancePosition = "right", -- "right", "below" or "above" the icons
+    distancePosition = "right", -- "right", "left", "below" or "above" the icons
     distanceColor = "white",
     distanceSize = 14,
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none

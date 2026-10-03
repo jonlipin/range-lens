@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.12.2 - 2026-10-03
+
+- The distance text can sit left of the icons too: Position now steps through Right of icons, Left of icons, Below icons and Above icons.
+
 ## 1.12.1 - 2026-10-03
 
 - The distance text's Shadow depth option is now called Text shadow. It works the same: 0 for no shadow, up to 4.
