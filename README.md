@@ -15,7 +15,7 @@ Made for WoW Forever (Interface 16001).
 - **Range numbers.** Each icon shows the spell's range in yards, both ends for a spell with a minimum range (8-25 for Charge).
 - **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.
 - **Or only what reaches.** Switch on Only show spells in range and an icon appears only while its spell can reach, with no red or orange at all.
-- **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20.
+- **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20, or formatted your way (12, <12, ~10, with or without "yd"), in the colour, size, shadow and position you choose.
 - **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Frost Nova starts 1 yard short, for its freeze, Arctic Reach is counted, and any of them can be unlocked and tuned.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
 - **Per character.** Each character keeps its own spells, panel position and settings.

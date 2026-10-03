@@ -18,6 +18,10 @@ local ADDON_NAME = ...
 
 local isSecret = issecretvalue or function() return false end
 
+-- The saved settings (this character's) and the character table; set at
+-- ADDON_LOADED. Declared here so every function below can see them.
+local db, cdb
+
 -- Plain boolean test that tolerates secrets: a secret yields `fallback`.
 local function Truthy(v, fallback)
     if isSecret(v) then return fallback end
@@ -248,16 +252,68 @@ local function CheckerFor(radius)
 end
 
 -- "8-10", "40+" or "0-5": between the farthest check that fails and the nearest that passes.
+-- Distance text, as the player chose to format it.
+local DIST_FORMATS = { "range", "max", "less", "mid" }
+local DIST_FORMAT_LABEL = { range = "8-12", max = "12", less = "<12", mid = "~10" }
+local DIST_POSITIONS = { "right", "below", "above" }
+local DIST_POSITION_LABEL = { right = "Right of icons", below = "Below icons", above = "Above icons" }
+local DIST_COLORS = { "white", "gold", "grey", "blue" }
+local DIST_COLOR_LABEL = { white = "White", gold = "Gold", grey = "Grey", blue = "Light blue" }
+local DIST_COLOR_RGB = { white = { 1, 1, 1 }, gold = { 1, 0.82, 0 }, grey = { 0.7, 0.7, 0.7 }, blue = { 0.45, 0.75, 1 } }
+
+local function FormatDistance(low, high)
+    local f = db.distanceFormat
+    local text
+    if not high then
+        text = low .. "+"
+    elseif f == "max" then
+        text = tostring(high)
+    elseif f == "less" then
+        text = "<" .. high
+    elseif f == "mid" then
+        text = "~" .. math.floor((low + high) / 2 + 0.5)
+    else
+        text = low .. "-" .. high
+    end
+    if db.distanceYd then text = text .. " yd" end
+    return text
+end
+
+-- Place and style a distance text against the icons it belongs to.
+local function StyleDistance(fs, anchor)
+    local pos = db.distancePosition or "right"
+    local color = db.distanceColor or "white"
+    local size = db.distanceSize or 14
+    local shadow = db.distanceShadow or 1
+    local key = pos .. ":" .. color .. ":" .. size .. ":" .. shadow
+    if fs.rlStyle == key and fs.rlAnchor == anchor then return end
+    fs.rlStyle, fs.rlAnchor = key, anchor
+    fs:ClearAllPoints()
+    if pos == "below" then
+        fs:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
+    elseif pos == "above" then
+        fs:SetPoint("BOTTOM", anchor, "TOP", 0, 2)
+    else
+        fs:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
+    end
+    local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white
+    fs:SetTextColor(rgb[1], rgb[2], rgb[3])
+    if fs.SetTextHeight then fs:SetTextHeight(size) end
+    fs:SetShadowColor(0, 0, 0, shadow > 0 and 1 or 0)
+    fs:SetShadowOffset(shadow, -shadow)
+end
+
+-- Between the farthest check that fails and the nearest that passes.
 local function DistanceText(unit)
     local low = 0
     for _, c in ipairs(Checkers()) do
         local r = RunChecker(c, unit)
         if r ~= nil and not isSecret(r) then
-            if r then return low .. "-" .. c.yards end
+            if r then return FormatDistance(low, c.yards) end
             low = c.yards
         end
     end
-    if low > 0 then return low .. "+" end
+    if low > 0 then return FormatDistance(low, nil) end
 end
 
 -- Radius of a self-centred spell: the table first, then "within N yards" in its description.
@@ -318,6 +374,12 @@ local DEFAULTS = {
     plateFocusOnly = false, -- ... or your focus's; both ticked = target and focus
     inRangeOnly = false,    -- hide a spell's icon while it can't reach, instead of red
     plateHideMelee = false, -- hide a nameplate's icons while that unit is in melee range
+    distanceFormat = "range",   -- distance text: "range" 8-12, "max" 12, "less" <12, "mid" ~10
+    distanceYd = false,         -- add " yd"
+    distancePosition = "right", -- "right", "below" or "above" the icons
+    distanceColor = "white",
+    distanceSize = 14,
+    distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
@@ -343,7 +405,7 @@ local CLASS_DEFAULTS = {
     PALADIN = { "Judgement", "Hammer of Justice", "Exorcism" },
 }
 
-local db, cdb
+-- db, cdb: declared at the top of the file.
 
 local function DeepCopy(src)
     local out = {}
@@ -803,6 +865,7 @@ local function UpdatePlateMelee(row, unit)
 end
 
 local function UpdatePlateDistance(row, unit)
+    StyleDistance(row.distance, row)
     local text = db.plateDistance and DistanceText(unit)
     row.distance:SetText(text or "")
 end
@@ -948,6 +1011,7 @@ local function UpdatePanel()
         panel:Hide()
         return
     end
+    StyleDistance(panel.distance, panel.row)
     local text = db.showDistance and Truthy(UnitExists("target"), false) and DistanceText("target")
     panel.distance:SetText(text or "")
     if not db.locked then
@@ -1299,6 +1363,36 @@ local function BuildContent()
     plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
     y = y - 34
 
+    -- A button that steps through choices; right-click goes back.
+    local function Cycle(label, key, values, labels)
+        local cap = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        cap:SetPoint("TOPLEFT", 20, y - 4)
+        cap:SetText(label)
+        local b = TryCreate("Button", nil, left, { "UIPanelButtonTemplate" })
+        b:SetSize(118, 22)
+        b:SetPoint("TOPLEFT", left, "TOPLEFT", LEFT_W - 150, y)
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:SetScript("OnClick", function(_, button)
+            local idx = 1
+            for i, v in ipairs(values) do if v == db[key] then idx = i end end
+            idx = (button == "RightButton") and ((idx - 2) % #values + 1) or (idx % #values + 1)
+            db[key] = values[idx]
+            b:SetText(labels[db[key]])
+            FullRefresh()
+            if previewHook then previewHook() end
+        end)
+        optionRefreshers[#optionRefreshers + 1] = function() b:SetText(labels[db[key]] or labels[values[1]]) end
+        y = y - 30
+    end
+
+    Heading("Distance text")
+    Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
+    Cycle("Position", "distancePosition", DIST_POSITIONS, DIST_POSITION_LABEL)
+    Cycle("Colour", "distanceColor", DIST_COLORS, DIST_COLOR_LABEL)
+    Check("Show \"yd\"", "distanceYd", FullRefresh)
+    Slider("Text size", "distanceSize", 8, 28)
+    Slider("Shadow depth", "distanceShadow", 0, 4)
+
     Heading("Size and position")
     Slider("Panel icon size", "panelIconSize", 16, 80)
     Slider("Nameplate icon size", "plateIconSize", 8, 40)
@@ -1510,7 +1604,8 @@ local function BuildContent()
                 icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
         end
-        prow.distance:SetText(db.plateDistance and "10-15" or "")
+        StyleDistance(prow.distance, prow)
+        prow.distance:SetText(db.plateDistance and FormatDistance(10, 15) or "")
         prow:SetShown(db.plates and (prow.count or 0) > 0)
         if not db.plates then
             previewEmpty:SetText("Nameplate icons are switched off.")
@@ -2022,7 +2117,7 @@ local HELP = {
     "/rl inrange - show only the spells that can reach (no red icons)",
     "/rl reach <spell> <yards> - set a spell's reach by hand; /rl reach <spell> sets it back to automatic",
     "/rl range - toggle the spell range number on icons",
-    "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates",
+    "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates (format it in the options)",
     "/rl lock | /rl unlock - lock or move the target panel",
     "/rl size <n> | /rl panelsize <n> - icon sizes",
     "/rl offset <n> | /rl offsetx <n> - nameplate row up/down and left/right",
