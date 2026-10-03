@@ -257,8 +257,8 @@ local DIST_FORMATS = { "range", "max", "less", "mid" }
 local DIST_FORMAT_LABEL = { range = "8-12", max = "12", less = "<12", mid = "~10" }
 local DIST_POSITIONS = { "right", "left", "below", "above" }
 local DIST_POSITION_LABEL = { right = "Right of icons", left = "Left of icons", below = "Below icons", above = "Above icons" }
-local DIST_COLORS = { "white", "gold", "grey", "blue" }
-local DIST_COLOR_LABEL = { white = "White", gold = "Gold", grey = "Grey", blue = "Light blue" }
+local DIST_COLORS = { "white", "gold", "grey", "blue", "distance" }
+local DIST_COLOR_LABEL = { white = "White", gold = "Gold", grey = "Grey", blue = "Light blue", distance = "By distance" }
 local DIST_COLOR_RGB = { white = { 1, 1, 1 }, gold = { 1, 0.82, 0 }, grey = { 0.7, 0.7, 0.7 }, blue = { 0.45, 0.75, 1 } }
 
 local function FormatDistance(low, high)
@@ -277,6 +277,25 @@ local function FormatDistance(low, high)
     end
     if db.distanceYd then text = text .. " yd" end
     return text
+end
+
+-- "By distance": green when close, yellow around 20 yd, red from 40 yd, by the
+-- far end of the range (the near end plus 5 for an open-ended "40+").
+local function DistanceColor(low, high)
+    local v = high or ((low or 0) + 5)
+    local t = math.max(0, math.min(1, (v - 5) / 35))
+    if t < 0.5 then
+        local k = t / 0.5
+        return 0.3 + 0.7 * k, 1 - 0.1 * k, 0.3 - 0.1 * k
+    end
+    local k = (t - 0.5) / 0.5
+    return 1, 0.9 - 0.6 * k, 0.2 + 0.1 * k
+end
+
+-- Colour a distance text: the chosen colour, or by the distance it shows.
+local function ColorDistance(fs, low, high)
+    if db.distanceColor ~= "distance" or not low then return end
+    fs:SetTextColor(DistanceColor(low, high))
 end
 
 -- Place and style a distance text against the icons it belongs to.
@@ -298,7 +317,7 @@ local function StyleDistance(fs, anchor)
     else
         fs:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
     end
-    local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white
+    local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white -- "distance" is coloured per update
     fs:SetTextColor(rgb[1], rgb[2], rgb[3])
     if fs.SetTextHeight then fs:SetTextHeight(size) end
     fs:SetShadowColor(0, 0, 0, shadow > 0 and 1 or 0)
@@ -311,11 +330,11 @@ local function DistanceText(unit)
     for _, c in ipairs(Checkers()) do
         local r = RunChecker(c, unit)
         if r ~= nil and not isSecret(r) then
-            if r then return FormatDistance(low, c.yards) end
+            if r then return FormatDistance(low, c.yards), low, c.yards end
             low = c.yards
         end
     end
-    if low > 0 then return FormatDistance(low, nil) end
+    if low > 0 then return FormatDistance(low, nil), low, nil end
 end
 
 -- Radius of a self-centred spell: the table first, then "within N yards" in its description.
@@ -868,8 +887,10 @@ end
 
 local function UpdatePlateDistance(row, unit)
     StyleDistance(row.distance, row)
-    local text = db.plateDistance and DistanceText(unit)
+    local text, low, high
+    if db.plateDistance then text, low, high = DistanceText(unit) end
     row.distance:SetText(text or "")
+    ColorDistance(row.distance, low, high)
 end
 
 local function OnPlateAdded(unit)
@@ -1014,8 +1035,10 @@ local function UpdatePanel()
         return
     end
     StyleDistance(panel.distance, panel.row)
-    local text = db.showDistance and Truthy(UnitExists("target"), false) and DistanceText("target")
+    local text, low, high
+    if db.showDistance and Truthy(UnitExists("target"), false) then text, low, high = DistanceText("target") end
     panel.distance:SetText(text or "")
+    ColorDistance(panel.distance, low, high)
     if not db.locked then
         -- Unlocked: always visible so it can be positioned.
         panel:Show()
@@ -1608,6 +1631,7 @@ local function BuildContent()
         end
         StyleDistance(prow.distance, prow)
         prow.distance:SetText(db.plateDistance and FormatDistance(10, 15) or "")
+        ColorDistance(prow.distance, 10, 15)
         prow:SetShown(db.plates and (prow.count or 0) > 0)
         if not db.plates then
             previewEmpty:SetText("Nameplate icons are switched off.")
