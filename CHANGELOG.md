@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.12.1 - 2026-10-03
+
+- The distance text's Shadow depth option is now called Text shadow. It works the same: 0 for no shadow, up to 4.
+
 ## 1.12.0 - 2026-10-03
 
 - Format the distance text. A new Distance text section in the options sets:
@@ -9,7 +13,7 @@ All notable changes to Range Lens are listed here. The newest release is at the 
   - Position: right of the icons, below them or above them
   - Colour: white, gold, grey or light blue
   - Show "yd" after the number
-  - Text size and shadow depth, as sliders you can also type into
+  - Text size and text shadow, as sliders you can also type into
 - These apply to the distance on nameplates and on the target panel, and the nameplate preview shows every change as you make it. Click a choice to step forward; right-click to step back.
 - The target panel's distance now follows the Position setting too. It used to sit above the panel; choose Above icons to keep it there.
 

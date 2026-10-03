@@ -1391,7 +1391,7 @@ local function BuildContent()
     Cycle("Colour", "distanceColor", DIST_COLORS, DIST_COLOR_LABEL)
     Check("Show \"yd\"", "distanceYd", FullRefresh)
     Slider("Text size", "distanceSize", 8, 28)
-    Slider("Shadow depth", "distanceShadow", 0, 4)
+    Slider("Text shadow", "distanceShadow", 0, 4)
 
     Heading("Size and position")
     Slider("Panel icon size", "panelIconSize", 16, 80)
