@@ -1,3 +1,9 @@
+## 1.15.0 - 2026-10-08
+
+- Where to show: one grid in the options replaces the scattered on/off checkboxes. For each part (spell icons, range text and the aggro light) tick where it shows: All (every enemy nameplate), Target, Focus, and Panel (the target panel). Each part is set on its own, so for example the range text can show on every nameplate while the spell icons only show on your target. Your settings carry over.
+- The aggro light is yellow when you near a mob's estimated aggro range and red inside it, and no longer green when you are clear (green read as safe to go). It is turned on in the grid, and a new Aggro light size slider sets its size.
+- The slash commands that switched these parts now switch the matching grid boxes: `/rl plates`, `/rl targetonly`, `/rl focusonly`, `/rl panel` (spell icons), `/rl platedistance`, `/rl distance` (range text) and `/rl aggro` (aggro light on every nameplate and the panel).
+
 ## 1.14.4 - 2026-10-08
 
 - The aggro light is a crisper circle now, a solid round light with a thin dark rim and a little glow behind it, and it sits directly left of the mob's health bar. On the target panel it sits just left of the icons.

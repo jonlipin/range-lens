@@ -403,6 +403,14 @@ local DEFAULTS = {
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
     aggroWarning = false,       -- "!" near (yellow) and inside (red) a red mob's estimated aggro radius
     aggroWarnYards = 5,         -- how many yards before the estimated edge the yellow warning starts
+    aggroSize = 12,             -- the aggro light's size
+    -- Where each part shows, set in the options' grid: every enemy nameplate,
+    -- your target's, your focus's, and the target panel.
+    show = {
+        icons = { all = true, target = false, focus = false, panel = true },
+        distance = { all = true, target = false, focus = false, panel = true },
+        aggro = { all = false, target = false, focus = false, panel = false },
+    },
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
@@ -788,11 +796,24 @@ local function IsPlateOf(unit, token)
     return Truthy(UnitIsUnit(unit, token), false)
 end
 
--- With "only on target" and/or "only on focus" ticked, is this nameplate one of them?
-local function PlateAllowed(unit)
-    if not (db.plateTargetOnly or db.plateFocusOnly) then return true end
-    return (db.plateTargetOnly and IsPlateOf(unit, "target"))
-        or (db.plateFocusOnly and IsPlateOf(unit, "focus")) or false
+-- The options' grid: does this part (icons, distance, aggro) show on this
+-- nameplate (all / target / focus), or on the target panel?
+local function ShowOnPlate(part, unit)
+    local m = db.show and db.show[part]
+    if not m then return false end
+    if m.all then return true end
+    return ((m.target and IsPlateOf(unit, "target")) or (m.focus and IsPlateOf(unit, "focus"))) and true or false
+end
+
+local function ShowOnPanel(part)
+    local m = db.show and db.show[part]
+    return (m and m.panel) and true or false
+end
+
+-- On any nameplate at all (for the preview).
+local function ShowOnAnyPlate(part)
+    local m = db.show and db.show[part]
+    return (m and (m.all or m.target or m.focus)) and true or false
 end
 
 -- In melee range: the 5 yard item check passes.
@@ -873,14 +894,15 @@ local function PlateLook()
     return { w = barW * h1, h = barH * v1, rowScale = 1 }, false
 end
 
+-- Whether this nameplate gets a row at all, and which parts it shows.
 local function WantsPlate(unit)
-    if not db.plates or #resolved == 0 then return false end
-    if not PlateAllowed(unit) then return false end
     if Truthy(UnitIsUnit("player", unit), false) then return false end
-    if db.enemyOnly then
-        return Truthy(UnitCanAttack("player", unit), true)
-    end
-    return true
+    if db.enemyOnly and not Truthy(UnitCanAttack("player", unit), true) then return false end
+    local icons = #resolved > 0 and ShowOnPlate("icons", unit)
+    local distance = ShowOnPlate("distance", unit)
+    local aggro = ShowOnPlate("aggro", unit)
+    if not (icons or distance or aggro) then return false end
+    return true, icons, distance, aggro
 end
 
 local function UpdatePlateMelee(row, unit)
@@ -913,7 +935,6 @@ end
 -- "near" when one proves you are within the warning distance of its edge,
 -- otherwise nil. Checks only ever light it late, never early.
 local function AggroState(unit)
-    if not db.aggroWarning then return nil end
     if IsStealthed and Truthy(IsStealthed(), true) then return nil end
     if Truthy(UnitAffectingCombat(unit), true) then return nil end
     local radius = AggroRadius(unit)
@@ -933,7 +954,14 @@ end
 local AGGRO_COLORS = { safe = { 0.25, 1, 0.35 }, near = { 1, 0.85, 0.1 }, inside = { 1, 0.15, 0.1 } }
 
 local function ShowAggroMark(m, state)
+    -- No green: a green light read as "safe to go". Yellow near, red inside.
+    if state == "safe" then state = nil end
     m.state = state
+    local size = db.aggroSize or 12
+    if m.rlSize ~= size then
+        m.rlSize = size
+        m:SetScale(size / 12)
+    end
     if not state then
         m:Hide()
         return
@@ -998,11 +1026,20 @@ local function MakeAggroMark(parent)
     return m
 end
 
+-- A plate's icons, or none if the grid leaves them off this plate.
+local function UpdatePlateIcons(row, unit)
+    if row.showIcons then
+        UpdateRow(row, unit)
+    else
+        for i = 1, row.count or 0 do row.icons[i]:Hide() end
+    end
+end
+
 local function UpdatePlateDistance(row, unit)
-    if row.aggro then ShowAggroMark(row.aggro, AggroState(unit)) end
+    if row.aggro then ShowAggroMark(row.aggro, row.showAggro and AggroState(unit) or nil) end
     StyleDistance(row.distance, row)
     local text, low, high
-    if db.plateDistance then text, low, high = DistanceText(unit) end
+    if row.showDistance then text, low, high = DistanceText(unit) end
     row.distance:SetText(text or "")
     ColorDistance(row.distance, low, high)
 end
@@ -1022,10 +1059,12 @@ local function OnPlateAdded(unit)
         LayoutRow(row, db.plateIconSize, 2, false)
     end
 
-    if not WantsPlate(unit) then
+    local wanted, icons, distance, aggro = WantsPlate(unit)
+    if not wanted then
         row:Hide()
         return
     end
+    row.showIcons, row.showDistance, row.showAggro = icons, distance, aggro
 
     row:ClearAllPoints()
     row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
@@ -1040,7 +1079,7 @@ local function OnPlateAdded(unit)
     row.unit = unit
     row:Show()
     activePlates[unit] = row
-    UpdateRow(row, unit)
+    UpdatePlateIcons(row, unit)
     UpdatePlateMelee(row, unit)
     UpdatePlateDistance(row, unit)
     UpdateRowCooldowns(row)
@@ -1152,20 +1191,25 @@ local function LayoutPanel()
 end
 
 local function UpdatePanel()
-    if not db.panel or #resolved == 0 then
+    local showIcons = ShowOnPanel("icons") and #resolved > 0
+    local showDistance, showAggro = ShowOnPanel("distance"), ShowOnPanel("aggro")
+    if not (showIcons or showDistance or showAggro) then
         panel:Hide()
         return
     end
+    local hasTarget = Truthy(UnitExists("target"), false)
     StyleDistance(panel.distance, panel.row)
-    ShowAggroMark(panel.aggro, Truthy(UnitExists("target"), false) and AggroState("target") or nil)
+    ShowAggroMark(panel.aggro, showAggro and hasTarget and AggroState("target") or nil)
     local text, low, high
-    if db.showDistance and Truthy(UnitExists("target"), false) then text, low, high = DistanceText("target") end
+    if showDistance and hasTarget then text, low, high = DistanceText("target") end
     panel.distance:SetText(text or "")
     ColorDistance(panel.distance, low, high)
     if not db.locked then
         -- Unlocked: always visible so it can be positioned.
         panel:Show()
-        if Truthy(UnitExists("target"), true) then
+        if not showIcons then
+            for i = 1, panel.row.count or 0 do panel.row.icons[i]:Hide() end
+        elseif Truthy(UnitExists("target"), true) then
             UpdateRow(panel.row, "target")
         else
             for i = 1, panel.row.count or 0 do
@@ -1179,7 +1223,11 @@ local function UpdatePanel()
     end
     if Truthy(UnitExists("target"), true) and not Truthy(UnitIsDeadOrGhost("target"), false) then
         panel:Show()
-        UpdateRow(panel.row, "target")
+        if showIcons then
+            UpdateRow(panel.row, "target")
+        else
+            for i = 1, panel.row.count or 0 do panel.row.icons[i]:Hide() end
+        end
     else
         panel:Hide()
     end
@@ -1204,7 +1252,7 @@ local function Tick()
     tickCount = tickCount + 1
     local distances = tickCount % 3 == 0
     for unit, row in pairs(activePlates) do
-        UpdateRow(row, unit)
+        UpdatePlateIcons(row, unit)
         UpdatePlateMelee(row, unit)
         if distances then UpdatePlateDistance(row, unit) end
     end
@@ -1487,28 +1535,50 @@ local function BuildContent()
         y = y - 50
     end
 
+    -- Where each part shows: a grid of parts by place.
+    Heading("Where to show")
+    local GRID_COLS = { { "all", "All" }, { "target", "Target" }, { "focus", "Focus" }, { "panel", "Panel" } }
+    local GRID_ROWS = { { "icons", "Spell icons" }, { "distance", "Range text" }, { "aggro", "Aggro light" } }
+    local gridX, gridW = 112, 42
+    for i, col in ipairs(GRID_COLS) do
+        local h = left:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("BOTTOM", left, "TOPLEFT", gridX + (i - 1) * gridW + 12, y - 12)
+        h:SetText(col[2])
+    end
+    y = y - 16
+    for _, r in ipairs(GRID_ROWS) do
+        local label = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("TOPLEFT", 16, y - 5)
+        label:SetText(r[2])
+        for i, col in ipairs(GRID_COLS) do
+            local cb = CreateCheck(left)
+            cb:SetPoint("TOPLEFT", gridX + (i - 1) * gridW, y)
+            cb:SetScript("OnClick", function(self)
+                db.show[r[1]][col[1]] = self:GetChecked() and true or false
+                FullRefresh()
+                if previewHook then previewHook() end
+            end)
+            optionRefreshers[#optionRefreshers + 1] = function()
+                cb:SetChecked(db.show[r[1]][col[1]] and true or false)
+            end
+        end
+        y = y - 26
+    end
+    local gridNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    gridNote:SetPoint("TOPLEFT", 20, y - 2)
+    gridNote:SetWidth(LEFT_W - 60)
+    gridNote:SetJustifyH("LEFT")
+    gridNote:SetText("All: every enemy nameplate. Target and Focus: only those mobs' nameplates. Panel: the target panel.")
+    y = y - 36
+    Check("Enemies only", "enemyOnly", RefreshAllPlates)
+    Check("Hide in melee range", "plateHideMelee", RefreshAllPlates)
+
     Heading("Icons")
-    Check("Nameplate icons", "plates", RefreshAllPlates)
-    Check("Target panel", "panel", UpdatePanel)
     Check("Lock panel", "locked", function() LayoutPanel() UpdatePanel() end)
     Check("Show cooldowns", "cooldowns", RefreshCooldowns)
     Check("Show spell range", "showRange", FullRefresh)
     Check("Only show spells in range", "inRangeOnly", FullRefresh)
-    Check("Distance on panel", "showDistance", UpdatePanel)
-    Check("Distance on nameplates", "plateDistance", RefreshAllPlates)
     Check("Minimap button", "minimap", function() UpdateMinimapButton() end)
-
-    Heading("Which nameplates")
-    Check("Enemies only", "enemyOnly", RefreshAllPlates)
-    Check("Hide in melee range", "plateHideMelee", RefreshAllPlates)
-    Check("Only on target's nameplate", "plateTargetOnly", RefreshAllPlates)
-    Check("Only on focus's nameplate", "plateFocusOnly", RefreshAllPlates)
-    local plateNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    plateNote:SetPoint("TOPLEFT", 20, y)
-    plateNote:SetWidth(LEFT_W - 60)
-    plateNote:SetJustifyH("LEFT")
-    plateNote:SetText("Tick both for target and focus; leave both clear for every enemy nameplate.")
-    y = y - 34
 
     -- A button that steps through choices; right-click goes back.
     local function Cycle(label, key, values, labels)
@@ -1532,15 +1602,15 @@ local function BuildContent()
         y = y - 30
     end
 
-    Heading("Aggro warning")
-    Check("Warn before aggro range", "aggroWarning", FullRefresh)
+    Heading("Aggro light")
     local aggroNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aggroNote:SetPoint("TOPLEFT", 20, y)
     aggroNote:SetWidth(LEFT_W - 60)
     aggroNote:SetJustifyH("LEFT")
-    aggroNote:SetText("A glowing circle on red mobs: green when clear, yellow within the warning distance of their aggro range, red and pulsing inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    aggroNote:SetText("Turn it on in Where to show. A light on red mobs: yellow within the warning distance of their aggro range, red and pulsing inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
     y = y - 66
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
+    Slider("Aggro light size", "aggroSize", 6, 30)
 
     Heading("Distance text")
     Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
@@ -1765,12 +1835,14 @@ local function BuildContent()
             end
         end
         StyleDistance(prow.distance, prow)
-        ShowAggroMark(prow.aggro, db.aggroWarning and "near" or nil)
-        prow.distance:SetText(db.plateDistance and FormatDistance(10, 15) or "")
+        ShowAggroMark(prow.aggro, ShowOnAnyPlate("aggro") and "near" or nil)
+        prow.distance:SetText(ShowOnAnyPlate("distance") and FormatDistance(10, 15) or "")
         ColorDistance(prow.distance, 10, 15)
-        prow:SetShown(db.plates and (prow.count or 0) > 0)
-        if not db.plates then
-            previewEmpty:SetText("Nameplate icons are switched off.")
+        local plateIcons = ShowOnAnyPlate("icons")
+        for i = 1, prow.count or 0 do prow.icons[i]:SetShown(plateIcons) end
+        prow:Show()
+        if not plateIcons then
+            previewEmpty:SetText("Spell icons are off for nameplates (see Where to show).")
         elseif (prow.count or 0) == 0 then
             previewEmpty:SetText("Tick spells below to see them here.")
         else
@@ -2338,17 +2410,17 @@ local function Slash(msg)
         FullRefresh()
         Print("loaded defaults for " .. tostring(class) .. " (" .. #resolved .. " known)")
     elseif cmd == "plates" then
-        db.plates = not db.plates
-        RefreshAllPlates()
-        Print("nameplate icons " .. OnOff(db.plates))
+        db.show.icons.all = not db.show.icons.all
+        FullRefresh()
+        Print("spell icons on every nameplate " .. OnOff(db.show.icons.all))
     elseif cmd == "panel" then
-        db.panel = not db.panel
-        UpdatePanel()
-        Print("target panel " .. OnOff(db.panel))
+        db.show.icons.panel = not db.show.icons.panel
+        FullRefresh()
+        Print("spell icons on the target panel " .. OnOff(db.show.icons.panel))
     elseif cmd == "targetonly" then
-        db.plateTargetOnly = not db.plateTargetOnly
-        RefreshAllPlates()
-        Print("target's nameplate only " .. OnOff(db.plateTargetOnly))
+        db.show.icons.target = not db.show.icons.target
+        FullRefresh()
+        Print("spell icons on your target's nameplate " .. OnOff(db.show.icons.target))
     elseif cmd == "reach" then
         local text = strtrim(rest or "")
         local spellName, n = text:match("^(.-)%s+(%d+)$")
@@ -2366,9 +2438,9 @@ local function Slash(msg)
         FullRefresh()
         Print("only show spells in range " .. OnOff(db.inRangeOnly))
     elseif cmd == "focusonly" then
-        db.plateFocusOnly = not db.plateFocusOnly
-        RefreshAllPlates()
-        Print("focus's nameplate only " .. OnOff(db.plateFocusOnly))
+        db.show.icons.focus = not db.show.icons.focus
+        FullRefresh()
+        Print("spell icons on your focus's nameplate " .. OnOff(db.show.icons.focus))
     elseif cmd == "melee" then
         db.plateHideMelee = not db.plateHideMelee
         RefreshAllPlates()
@@ -2390,7 +2462,7 @@ local function Slash(msg)
         end
         Print(("version %s, %d spells resolved, nameplate icons %s, enemies only %s"):format(
             tostring(C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")),
-            #resolved, OnOff(db.plates), OnOff(db.enemyOnly)))
+            #resolved, OnOff(db.show.icons.all), OnOff(db.enemyOnly)))
         local units = { "target" }
         for unit in pairs(plateUnits) do units[#units + 1] = unit end
         local shown = 0
@@ -2425,21 +2497,22 @@ local function Slash(msg)
         end
         if shown == 0 then Print("no target and no nameplates in view") end
     elseif cmd == "aggro" then
-        db.aggroWarning = not db.aggroWarning
+        local on = not (db.show.aggro.all or db.show.aggro.panel)
+        db.show.aggro.all, db.show.aggro.panel = on, on
         FullRefresh()
-        Print("aggro warning " .. OnOff(db.aggroWarning))
+        Print("aggro light on every nameplate and the panel " .. OnOff(on))
     elseif cmd == "minimap" then
         db.minimap = not db.minimap
         UpdateMinimapButton()
         Print("minimap button " .. OnOff(db.minimap))
     elseif cmd == "distance" then
-        db.showDistance = not db.showDistance
-        UpdatePanel()
-        Print("distance on panel " .. OnOff(db.showDistance))
+        db.show.distance.panel = not db.show.distance.panel
+        FullRefresh()
+        Print("range text on the target panel " .. OnOff(db.show.distance.panel))
     elseif cmd == "platedistance" then
-        db.plateDistance = not db.plateDistance
-        RefreshAllPlates()
-        Print("distance on nameplates " .. OnOff(db.plateDistance))
+        db.show.distance.all = not db.show.distance.all
+        FullRefresh()
+        Print("range text on every nameplate " .. OnOff(db.show.distance.all))
     elseif cmd == "range" then
         db.showRange = not db.showRange
         FullRefresh()
@@ -2542,6 +2615,24 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
             if db.plateOffsetY == -2 then db.plateOffsetY = nil end
             db.offsetMoved = true
         end
+        -- 1.15.0: the scattered on/off checkboxes became the Where to show grid.
+        if not db.show then
+            local onTarget, onFocus = db.plateTargetOnly and true or false, db.plateFocusOnly and true or false
+            local limited = onTarget or onFocus
+            local function Plates(on)
+                return { all = on and not limited, target = on and onTarget, focus = on and onFocus }
+            end
+            local icons = Plates(db.plates ~= false)
+            icons.panel = db.panel ~= false
+            local distance = Plates(db.plates ~= false and db.plateDistance ~= false)
+            distance.panel = db.showDistance ~= false
+            local aggroOn = db.aggroWarning and true or false
+            db.show = {
+                icons = icons,
+                distance = distance,
+                aggro = { all = aggroOn, target = false, focus = false, panel = aggroOn },
+            }
+        end
         CopyDefaults(DEFAULTS, db)
         if not cdb.spells then
             local _, class = UnitClass("player")
@@ -2575,7 +2666,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         plateUnits[arg1] = nil
         OnPlateRemoved(arg1)
     elseif event == "PLAYER_TARGET_CHANGED" then
-        if db.plateTargetOnly then RefreshAllPlates() end
+        RefreshAllPlates()
         UpdatePanel()
     elseif event == "CVAR_UPDATE" then
         -- Size or Style changed in Options > Nameplates: the plates on screen
@@ -2591,7 +2682,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
             end)
         end
     elseif event == "PLAYER_FOCUS_CHANGED" then
-        if db.plateFocusOnly then RefreshAllPlates() end
+        RefreshAllPlates()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         OnItemLoaded(arg1, arg2)
     elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
