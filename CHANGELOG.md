@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.14.4 - 2026-10-08
+
+- The aggro light is a crisper circle now, a solid round light with a thin dark rim and a little glow behind it, and it sits directly left of the mob's health bar. On the target panel it sits just left of the icons.
+
 ## 1.14.3 - 2026-10-08
 
 - The aggro warning is a glowing circle now, using the game's own soft glow: green while you are clear of a red mob's estimated aggro range, yellow within the warning distance, and red and pulsing inside it.

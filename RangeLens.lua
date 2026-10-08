@@ -939,8 +939,8 @@ local function ShowAggroMark(m, state)
         return
     end
     local c = AGGRO_COLORS[state]
-    m.glow:SetVertexColor(c[1], c[2], c[3])
-    m.core:SetVertexColor(c[1], c[2], c[3])
+    m.halo:SetVertexColor(c[1], c[2], c[3])
+    m.core:SetColorTexture(c[1], c[2], c[3], 1)
     m:Show()
     if m.pulse then
         if state == "inside" then
@@ -953,30 +953,44 @@ local function ShowAggroMark(m, state)
 end
 
 local function MakeAggroMark(parent)
+    -- A defined round light: a solid disc cut by the game's round mask, a thin
+    -- dark rim, and a little of the soft glow behind it.
     local m = CreateFrame("Frame", nil, parent)
-    m:SetSize(16, 16)
-    m:SetPoint("CENTER", parent, "TOPLEFT", 2, 4)
+    m:SetSize(12, 12)
+    m:SetPoint("RIGHT", parent, "LEFT", -4, 0)
     m:SetFrameLevel(parent:GetFrameLevel() + 30)
-    local function Orb(layer, size, blend)
-        local t = m:CreateTexture(nil, layer)
-        if HasAtlas("BonusChest-CircleGlow") then
-            t:SetAtlas("BonusChest-CircleGlow")
-        else
-            t:SetColorTexture(1, 1, 1, 0.8)
-        end
-        t:SetBlendMode(blend)
+    local round = m.CreateMaskTexture and HasAtlas("CircleMaskScalable")
+    local function Disc(layer, sublevel, size)
+        local t = m:CreateTexture(nil, layer, nil, sublevel)
         t:SetSize(size, size)
         t:SetPoint("CENTER")
+        if round then
+            local mask = m:CreateMaskTexture()
+            mask:SetAtlas("CircleMaskScalable")
+            mask:SetAllPoints(t)
+            t:AddMaskTexture(mask)
+        end
         return t
     end
-    m.glow = Orb("ARTWORK", 26, "ADD")  -- the soft halo
-    m.core = Orb("OVERLAY", 12, "BLEND") -- the brighter middle
+    m.halo = m:CreateTexture(nil, "BACKGROUND")
+    if HasAtlas("BonusChest-CircleGlow") then m.halo:SetAtlas("BonusChest-CircleGlow") end
+    m.halo:SetBlendMode("ADD")
+    m.halo:SetSize(22, 22)
+    m.halo:SetPoint("CENTER")
+    m.halo:SetAlpha(0.55)
+    m.rim = Disc("ARTWORK", 0, 12)
+    m.rim:SetColorTexture(0, 0, 0, 0.9)
+    m.core = Disc("ARTWORK", 1, 9)
+    m.shine = Disc("ARTWORK", 2, 4)
+    m.shine:ClearAllPoints()
+    m.shine:SetPoint("CENTER", m, "CENTER", -1.5, 1.5)
+    m.shine:SetColorTexture(1, 1, 1, 0.45)
     local ok, pulse = pcall(m.CreateAnimationGroup, m)
     if ok and pulse then
         pulse:SetLooping("BOUNCE")
         local fade = pulse:CreateAnimation("Alpha")
         fade:SetFromAlpha(1)
-        fade:SetToAlpha(0.35)
+        fade:SetToAlpha(0.4)
         fade:SetDuration(0.45)
         m.pulse = pulse
     end
@@ -1015,6 +1029,12 @@ local function OnPlateAdded(unit)
 
     row:ClearAllPoints()
     row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+    if row.aggro then
+        -- The aggro light sits directly left of the health bar (its frame art
+        -- reaches 2 past the bar).
+        row.aggro:ClearAllPoints()
+        row.aggro:SetPoint("RIGHT", PlateAnchor(plate), "LEFT", -5, 0)
+    end
     -- The options preview copies a real plate's size (see MeasurePlate).
     MeasurePlate(plate, row, PlateAnchor(plate))
     row.unit = unit
@@ -1601,6 +1621,8 @@ local function BuildContent()
 
     local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
     prow.aggro = MakeAggroMark(prow)
+    prow.aggro:ClearAllPoints()
+    prow.aggro:SetPoint("RIGHT", mockBar, "LEFT", -5, 0)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
