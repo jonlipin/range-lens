@@ -401,6 +401,7 @@ local DEFAULTS = {
     distanceColor = "white",
     distanceSize = 14,
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
+    aggroWarning = false,       -- "!" when you are inside a red mob's estimated aggro radius
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
@@ -885,7 +886,45 @@ local function UpdatePlateMelee(row, unit)
     row:SetAlpha((db.plateHideMelee and InMelee(unit)) and 0 or 1)
 end
 
+-- Aggro estimate (Classic rule of thumb; the game keeps the real one on its
+-- server): about 20 yd for a mob of your level, 1 yd less per level you are
+-- above it and 1 more per level below, kept within 5 to 45 yd; ?? mobs 45.
+-- Only hostile (red) NPCs, only out of stealth, and not once it is fighting.
+local AGGRO_BASE, AGGRO_MIN, AGGRO_MAX = 20, 5, 45
+
+local function AggroRadius(unit)
+    if Truthy(UnitIsPlayer(unit), true) then return nil end
+    local reaction = UnitReaction and UnitReaction(unit, "player")
+    if isSecret(reaction) or type(reaction) ~= "number" or reaction > 2 then return nil end
+    local mine, theirs = UnitLevel("player"), UnitLevel(unit)
+    if isSecret(mine) or isSecret(theirs) or type(mine) ~= "number" or type(theirs) ~= "number" then return nil end
+    if theirs <= 0 then return AGGRO_MAX end
+    return math.max(AGGRO_MIN, math.min(AGGRO_MAX, AGGRO_BASE - (mine - theirs)))
+end
+
+-- True only when a distance check proves you are inside the estimated radius.
+local function InAggroRange(unit)
+    if not db.aggroWarning then return false end
+    if IsStealthed and Truthy(IsStealthed(), true) then return false end
+    if Truthy(UnitAffectingCombat(unit), true) then return false end
+    local radius = AggroRadius(unit)
+    local c = radius and CheckerFor(radius)
+    return c ~= nil and RunChecker(c, unit) == true
+end
+
+local function MakeAggroMark(parent)
+    local fs = parent:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    fs:SetText("!")
+    fs:SetTextColor(1, 0.25, 0.2)
+    fs:SetShadowColor(0, 0, 0, 1)
+    fs:SetShadowOffset(1, -1)
+    fs:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 0, 1)
+    fs:Hide()
+    return fs
+end
+
 local function UpdatePlateDistance(row, unit)
+    if row.aggro then row.aggro:SetShown(InAggroRange(unit)) end
     StyleDistance(row.distance, row)
     local text, low, high
     if db.plateDistance then text, low, high = DistanceText(unit) end
@@ -901,6 +940,7 @@ local function OnPlateAdded(unit)
     if not row then
         row = CreateFrame("Frame", nil, plate)
         row:SetFrameLevel(plate:GetFrameLevel() + 10)
+        row.aggro = MakeAggroMark(row)
         row.distance = row:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         row.distance:SetPoint("LEFT", row, "RIGHT", 4, 0)
         plateRows[plate] = row
@@ -963,6 +1003,7 @@ panel:Hide()
 panel.row = CreateFrame("Frame", nil, panel)
 panel.row:SetPoint("CENTER")
 
+panel.aggro = MakeAggroMark(panel.row)
 panel.distance = panel:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
 panel.distance:SetPoint("BOTTOM", panel, "TOP", 0, 0)
 
@@ -1035,6 +1076,7 @@ local function UpdatePanel()
         return
     end
     StyleDistance(panel.distance, panel.row)
+    panel.aggro:SetShown(Truthy(UnitExists("target"), false) and InAggroRange("target"))
     local text, low, high
     if db.showDistance and Truthy(UnitExists("target"), false) then text, low, high = DistanceText("target") end
     panel.distance:SetText(text or "")
@@ -1410,6 +1452,15 @@ local function BuildContent()
         y = y - 30
     end
 
+    Heading("Aggro warning")
+    Check("Show \"!\" inside aggro range", "aggroWarning", FullRefresh)
+    local aggroNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    aggroNote:SetPoint("TOPLEFT", 20, y)
+    aggroNote:SetWidth(LEFT_W - 60)
+    aggroNote:SetJustifyH("LEFT")
+    aggroNote:SetText("An estimate: red mobs only, out of stealth. About 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    y = y - 52
+
     Heading("Distance text")
     Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
     Cycle("Position", "distancePosition", DIST_POSITIONS, DIST_POSITION_LABEL)
@@ -1488,6 +1539,7 @@ local function BuildContent()
     local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
 
     local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
+    prow.aggro = MakeAggroMark(prow)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1630,6 +1682,7 @@ local function BuildContent()
             end
         end
         StyleDistance(prow.distance, prow)
+        prow.aggro:SetShown(db.aggroWarning and true or false)
         prow.distance:SetText(db.plateDistance and FormatDistance(10, 15) or "")
         ColorDistance(prow.distance, 10, 15)
         prow:SetShown(db.plates and (prow.count or 0) > 0)
@@ -2130,6 +2183,7 @@ end
 local HELP = {
     "/rl - open the options (Options > AddOns > Range Lens)",
     "/rl minimap - show or hide the minimap button",
+    "/rl aggro - toggle the \"!\" inside a red mob's estimated aggro range",
     "/rl debug - print the range answers for your target and each nameplate",
     "/rl add <spell name or ID> - track a spell",
     "/rl remove <spell or list number> - stop tracking",
@@ -2274,6 +2328,10 @@ local function Slash(msg)
                     .. (interactBlocked and " (interact blocked this session)" or "")
                     .. (tradeBroken and " (9 yd trade check dropped: it said no inside 8 yd)" or ""))
                 local row = activePlates[unit]
+                local radius = AggroRadius(unit)
+                if radius then
+                    Print(("  aggro estimate %d yd, inside: %s"):format(radius, tostring(InAggroRange(unit))))
+                end
                 Print(("%s %s: attackable %s, icons %s | %s"):format(unit, tostring(UnitName(unit)),
                     Show(UnitCanAttack("player", unit)),
                     unit == "target" and "(panel)" or (row and (row:IsShown() and "shown" or "hidden") or "|cffff4040none|r"),
@@ -2282,6 +2340,10 @@ local function Slash(msg)
             end
         end
         if shown == 0 then Print("no target and no nameplates in view") end
+    elseif cmd == "aggro" then
+        db.aggroWarning = not db.aggroWarning
+        FullRefresh()
+        Print("aggro warning " .. OnOff(db.aggroWarning))
     elseif cmd == "minimap" then
         db.minimap = not db.minimap
         UpdateMinimapButton()

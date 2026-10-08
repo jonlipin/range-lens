@@ -1,3 +1,3 @@
-## 1.13.0 - 2026-10-03
+## 1.14.0 - 2026-10-08
 
-- Colour the distance text by distance: a new By distance choice under Distance text > Colour. The text runs from green when the mob is close, through yellow around 20 yards, to red from 40 yards, judged by the far end of the range shown (8-12 is green, 30-35 orange). The nameplate preview shows it too.
+- Aggro warning (off unless you switch it on, under Aggro warning in the options, or `/rl aggro`): a red "!" on a mob's icon row, and on the target panel, while you are inside its estimated aggro range. It is an estimate, because the game keeps the real range to itself: about 20 yards for a mob of your level, 1 yard less per level you are above it and 1 more per level below, kept within 5 to 45 yards (45 for ?? mobs). It only covers red mobs, only out of stealth, and not once the mob is fighting. It lights only when a distance check proves you are inside the estimate, so it can light a little late but never early. `/rl debug` shows each mob's estimate.
