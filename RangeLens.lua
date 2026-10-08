@@ -1361,7 +1361,6 @@ local CONTENT_H = 540
 local content              -- every control, in one frame
 local window               -- standalone window, used only when the game's page can't open
 local settingsPage, settingsCategory
-local nativeOpenFailed = false
 local UpdateMinimapButton  -- defined below
 
 -- Builds every control into one frame. It is shown on the game's own
@@ -2050,14 +2049,15 @@ local function ToggleOptions()
         window:Hide()
         return
     end
-    if settingsCategory and Settings and Settings.OpenToCategory and not nativeOpenFailed then
+    -- Always the game's own options window, at the Range Lens page. It can take
+    -- a frame to show, so its visibility is not checked here (1.14.1: checking
+    -- too early sent players to the standalone window for the whole session).
+    if settingsCategory and Settings and Settings.OpenToCategory then
         local id = settingsCategory.GetID and settingsCategory:GetID() or settingsCategory.ID or settingsCategory
         pcall(Settings.OpenToCategory, id)
-        -- Trust what is on screen, not the call's return value.
-        if PageOpen() then return end
-        nativeOpenFailed = true
+        return
     end
-    ShowWindow()
+    ShowWindow() -- only on a client without the game's settings panel
 end
 
 panel:SetScript("OnMouseUp", function(_, button)
