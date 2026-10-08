@@ -899,7 +899,13 @@ local function AggroRadius(unit)
     if isSecret(reaction) or type(reaction) ~= "number" or reaction > 2 then return nil end
     local mine, theirs = UnitLevel("player"), UnitLevel(unit)
     if isSecret(mine) or isSecret(theirs) or type(mine) ~= "number" or type(theirs) ~= "number" then return nil end
-    if theirs <= 0 then return AGGRO_MAX end
+    if theirs <= 0 then
+        -- ??: a raid boss is taken as 3 levels above you (Classic's level 63
+        -- bosses against level 60 players); any other ?? as 10 above, the
+        -- smallest gap that shows as ??.
+        local class = UnitClassification and UnitClassification(unit)
+        theirs = mine + ((not isSecret(class) and class == "worldboss") and 3 or 10)
+    end
     return math.max(AGGRO_MIN, math.min(AGGRO_MAX, AGGRO_BASE - (mine - theirs)))
 end
 
@@ -919,27 +925,63 @@ local function AggroState(unit)
         local near = CheckerFor(radius + warn)
         if near and near ~= inside and RunChecker(near, unit) == true then return "near" end
     end
-    return nil
+    return "safe"
 end
 
-local function ShowAggroMark(fs, state)
-    if state == "inside" then
-        fs:SetTextColor(1, 0.25, 0.2)
-    elseif state == "near" then
-        fs:SetTextColor(1, 0.85, 0.1)
+-- A glowing orb (the game's BonusChest-CircleGlow, a soft white glow that
+-- takes any colour): green safe, yellow near, red inside and pulsing.
+local AGGRO_COLORS = { safe = { 0.25, 1, 0.35 }, near = { 1, 0.85, 0.1 }, inside = { 1, 0.15, 0.1 } }
+
+local function ShowAggroMark(m, state)
+    m.state = state
+    if not state then
+        m:Hide()
+        return
     end
-    fs:SetShown(state ~= nil)
+    local c = AGGRO_COLORS[state]
+    m.glow:SetVertexColor(c[1], c[2], c[3])
+    m.core:SetVertexColor(c[1], c[2], c[3])
+    m:Show()
+    if m.pulse then
+        if state == "inside" then
+            if not m.pulse:IsPlaying() then m.pulse:Play() end
+        elseif m.pulse:IsPlaying() then
+            m.pulse:Stop()
+            m:SetAlpha(1)
+        end
+    end
 end
 
 local function MakeAggroMark(parent)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    fs:SetText("!")
-    fs:SetTextColor(1, 0.25, 0.2)
-    fs:SetShadowColor(0, 0, 0, 1)
-    fs:SetShadowOffset(1, -1)
-    fs:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", 0, 1)
-    fs:Hide()
-    return fs
+    local m = CreateFrame("Frame", nil, parent)
+    m:SetSize(16, 16)
+    m:SetPoint("CENTER", parent, "TOPLEFT", 2, 4)
+    m:SetFrameLevel(parent:GetFrameLevel() + 30)
+    local function Orb(layer, size, blend)
+        local t = m:CreateTexture(nil, layer)
+        if HasAtlas("BonusChest-CircleGlow") then
+            t:SetAtlas("BonusChest-CircleGlow")
+        else
+            t:SetColorTexture(1, 1, 1, 0.8)
+        end
+        t:SetBlendMode(blend)
+        t:SetSize(size, size)
+        t:SetPoint("CENTER")
+        return t
+    end
+    m.glow = Orb("ARTWORK", 26, "ADD")  -- the soft halo
+    m.core = Orb("OVERLAY", 12, "BLEND") -- the brighter middle
+    local ok, pulse = pcall(m.CreateAnimationGroup, m)
+    if ok and pulse then
+        pulse:SetLooping("BOUNCE")
+        local fade = pulse:CreateAnimation("Alpha")
+        fade:SetFromAlpha(1)
+        fade:SetToAlpha(0.35)
+        fade:SetDuration(0.45)
+        m.pulse = pulse
+    end
+    m:Hide()
+    return m
 end
 
 local function UpdatePlateDistance(row, unit)
@@ -1476,7 +1518,7 @@ local function BuildContent()
     aggroNote:SetPoint("TOPLEFT", 20, y)
     aggroNote:SetWidth(LEFT_W - 60)
     aggroNote:SetJustifyH("LEFT")
-    aggroNote:SetText("Yellow ! when you are within the warning distance of a red mob's aggro range, red ! inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    aggroNote:SetText("A glowing circle on red mobs: green when clear, yellow within the warning distance of their aggro range, red and pulsing inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
     y = y - 66
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
 

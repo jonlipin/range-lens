@@ -18,7 +18,7 @@ Made for WoW Forever (Interface 16001).
 - **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20, or formatted your way (12, <12, ~10, with or without "yd"), in the colour (or coloured by distance), size, shadow and position you choose.
 - **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Frost Nova starts 1 yard short, for its freeze, Arctic Reach is counted, and any of them can be unlocked and tuned.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
-- **Aggro warning.** An optional yellow "!" as you near a red mob's estimated aggro range, turning red inside it (out of stealth; an estimate from levels, since the game keeps the real range to itself).
+- **Aggro warning.** An optional glowing circle on red mobs: green when clear, yellow as you near their estimated aggro range, red and pulsing inside it (out of stealth; an estimate from levels, since the game keeps the real range to itself).
 - **Per character.** Each character keeps its own spells, panel position and settings.
 - **Safe in combat.** It never reads values the game keeps hidden in combat, and it skips the distance checks the game refuses on friendly units in combat.
 

@@ -1,3 +1,8 @@
+## 1.14.3 - 2026-10-08
+
+- The aggro warning is a glowing circle now, using the game's own soft glow: green while you are clear of a red mob's estimated aggro range, yellow within the warning distance, and red and pulsing inside it.
+- ?? mobs are no longer all treated as 45 yards: a raid boss counts as 3 levels above you (about 23 yards at your level, as Classic's level 63 bosses), and any other ?? mob as 10 levels above (about 30 yards).
+
 ## 1.14.2 - 2026-10-08
 
 - The aggro warning now warns before you reach a mob's aggro range, not once you are in it: a yellow "!" when you are within a set distance of its estimated edge, turning red once you are inside. Set the distance with the new Warn yards early slider (0 to 15, default 5). The option is now called Warn before aggro range, and `/rl debug` shows where the warning starts for each mob.
