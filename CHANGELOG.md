@@ -2,6 +2,11 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.16.0 - 2026-10-08
+
+- The aggro warning is the dungeon finder eye now, animated as the game animates it in its own queue button: searching, on a yellow glow, as you near a mob's estimated aggro range, and fixed on you, on a pulsing red glow, inside it. The size slider is now Aggro eye size (10 to 40, default 20).
+- Range as a light: under Range, Show as switches between Numbers and Light. The light is green while the mob is within the first distance you set, yellow within the second, red beyond (Green up to and Yellow up to, default 10 and 30 yards), so you can set it to your spells instead of reading numbers. It sits where the range text would and follows the same Position and Text size. In the Where to show grid the row is now called Range.
+
 ## 1.15.0 - 2026-10-08
 
 - Where to show: one grid in the options replaces the scattered on/off checkboxes. For each part (spell icons, range text and the aggro light) tick where it shows: All (every enemy nameplate), Target, Focus, and Panel (the target panel). Each part is set on its own, so for example the range text can show on every nameplate while the spell icons only show on your target. Your settings carry over.

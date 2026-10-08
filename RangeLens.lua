@@ -403,7 +403,10 @@ local DEFAULTS = {
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
     aggroWarning = false,       -- "!" near (yellow) and inside (red) a red mob's estimated aggro radius
     aggroWarnYards = 5,         -- how many yards before the estimated edge the yellow warning starts
-    aggroSize = 12,             -- the aggro light's size
+    aggroSize = 20,             -- the aggro eye's size
+    distanceStyle = "numbers",  -- range shown as "numbers" or as a coloured "light"
+    lightGreen = 10,            -- range light: green while the mob is within this many yards
+    lightYellow = 30,           -- ... yellow within this many, red beyond
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
     show = {
@@ -949,40 +952,12 @@ local function AggroState(unit)
     return "safe"
 end
 
--- A glowing orb (the game's BonusChest-CircleGlow, a soft white glow that
--- takes any colour): green safe, yellow near, red inside and pulsing.
-local AGGRO_COLORS = { safe = { 0.25, 1, 0.35 }, near = { 1, 0.85, 0.1 }, inside = { 1, 0.15, 0.1 } }
+-- A round coloured light: a solid disc cut by the game's round mask, a thin
+-- dark rim, a little shine, and a little of the soft glow (BonusChest-CircleGlow)
+-- behind it. Used for the range light.
+local LIGHT_COLORS = { green = { 0.25, 1, 0.35 }, yellow = { 1, 0.85, 0.1 }, red = { 1, 0.15, 0.1 } }
 
-local function ShowAggroMark(m, state)
-    -- No green: a green light read as "safe to go". Yellow near, red inside.
-    if state == "safe" then state = nil end
-    m.state = state
-    local size = db.aggroSize or 12
-    if m.rlSize ~= size then
-        m.rlSize = size
-        m:SetScale(size / 12)
-    end
-    if not state then
-        m:Hide()
-        return
-    end
-    local c = AGGRO_COLORS[state]
-    m.halo:SetVertexColor(c[1], c[2], c[3])
-    m.core:SetColorTexture(c[1], c[2], c[3], 1)
-    m:Show()
-    if m.pulse then
-        if state == "inside" then
-            if not m.pulse:IsPlaying() then m.pulse:Play() end
-        elseif m.pulse:IsPlaying() then
-            m.pulse:Stop()
-            m:SetAlpha(1)
-        end
-    end
-end
-
-local function MakeAggroMark(parent)
-    -- A defined round light: a solid disc cut by the game's round mask, a thin
-    -- dark rim, and a little of the soft glow behind it.
+local function MakeLight(parent)
     local m = CreateFrame("Frame", nil, parent)
     m:SetSize(12, 12)
     m:SetPoint("RIGHT", parent, "LEFT", -4, 0)
@@ -1013,17 +988,165 @@ local function MakeAggroMark(parent)
     m.shine:ClearAllPoints()
     m.shine:SetPoint("CENTER", m, "CENTER", -1.5, 1.5)
     m.shine:SetColorTexture(1, 1, 1, 0.45)
-    local ok, pulse = pcall(m.CreateAnimationGroup, m)
-    if ok and pulse then
+    m:Hide()
+    return m
+end
+
+-- Colour (green / yellow / red) and size a light; nil hides it.
+local function SetLight(m, color, size)
+    m.color = color
+    if not color then
+        m:Hide()
+        return
+    end
+    size = size or 12
+    if m.rlSize ~= size then
+        m.rlSize = size
+        m:SetScale(size / 12)
+    end
+    local c = LIGHT_COLORS[color]
+    m.halo:SetVertexColor(c[1], c[2], c[3])
+    m.core:SetColorTexture(c[1], c[2], c[3], 1)
+    m:Show()
+end
+
+-- The range light's colour for a distance bracket, judged by its far end.
+local function LightBand(low, high)
+    if not low then return nil end
+    local far = high or math.huge
+    local green = db.lightGreen or 10
+    local yellow = math.max(green, db.lightYellow or 30)
+    if far <= green then return "green" end
+    if far <= yellow then return "yellow" end
+    return "red"
+end
+
+-- The aggro eye: the dungeon finder eye, animated as the game animates it in
+-- its own queue button (Blizzard_LFGUtil LFGEye.xml): searching (looking
+-- around) when you near a mob's estimated aggro range, found (fixed on you)
+-- inside it, over its back glow tinted yellow or red.
+local EYE_ANIMS = {
+    near = { atlas = "groupfinder-eye-flipbook-searching", rows = 8, cols = 11, frames = 80, duration = 2 },
+    inside = { atlas = "groupfinder-eye-flipbook-found-loop", rows = 4, cols = 11, frames = 41, duration = 1.5 },
+}
+local EYE_GLOW = { near = { 1, 0.85, 0.1 }, inside = { 1, 0.15, 0.1 } }
+
+local function MakeAggroEye(parent)
+    local m = CreateFrame("Frame", nil, parent)
+    m:SetSize(45, 45)
+    m:SetPoint("RIGHT", parent, "LEFT", -4, 0)
+    m:SetFrameLevel(parent:GetFrameLevel() + 30)
+    m.glow = m:CreateTexture(nil, "BACKGROUND")
+    if HasAtlas("groupfinder-eye-backglow") then
+        m.glow:SetAtlas("groupfinder-eye-backglow")
+    elseif HasAtlas("BonusChest-CircleGlow") then
+        m.glow:SetAtlas("BonusChest-CircleGlow")
+    end
+    m.glow:SetSize(82, 82)
+    m.glow:SetPoint("CENTER")
+    m.eyes = {}
+    for state, a in pairs(EYE_ANIMS) do
+        local t = m:CreateTexture(nil, "ARTWORK")
+        t:SetSize(44, 44)
+        t:SetPoint("CENTER")
+        local anim
+        if HasAtlas(a.atlas) and pcall(t.SetAtlas, t, a.atlas) then
+            local okGroup, group = pcall(t.CreateAnimationGroup, t)
+            local okFlip, flip = false, nil
+            if okGroup and group then okFlip, flip = pcall(group.CreateAnimation, group, "FlipBook") end
+            if okFlip and flip and pcall(function()
+                flip:SetFlipBookRows(a.rows)
+                flip:SetFlipBookColumns(a.cols)
+                flip:SetFlipBookFrames(a.frames)
+                flip:SetDuration(a.duration)
+                group:SetLooping("REPEAT")
+            end) then
+                anim = group
+            end
+        end
+        if not anim then
+            -- No flipbook on this client: the still eye.
+            if HasAtlas("groupfinder-eye-single") then t:SetAtlas("groupfinder-eye-single") end
+        end
+        t:Hide()
+        m.eyes[state] = { tex = t, anim = anim }
+    end
+    local okPulse, pulse = pcall(m.glow.CreateAnimationGroup, m.glow)
+    if okPulse and pulse then
         pulse:SetLooping("BOUNCE")
         local fade = pulse:CreateAnimation("Alpha")
         fade:SetFromAlpha(1)
-        fade:SetToAlpha(0.4)
+        fade:SetToAlpha(0.35)
         fade:SetDuration(0.45)
         m.pulse = pulse
     end
     m:Hide()
     return m
+end
+
+local function ShowAggroMark(m, state)
+    -- No "safe": a light for being clear read as "safe to go".
+    if state == "safe" then state = nil end
+    m.state = state
+    local size = db.aggroSize or 20
+    if m.rlSize ~= size then
+        m.rlSize = size
+        m:SetScale(size / 45)
+    end
+    for which, eye in pairs(m.eyes) do
+        local on = which == state
+        eye.tex:SetShown(on)
+        if eye.anim then
+            if on and not eye.anim:IsPlaying() then eye.anim:Play()
+            elseif not on and eye.anim:IsPlaying() then eye.anim:Stop() end
+        end
+    end
+    if not state then
+        m:Hide()
+        return
+    end
+    local c = EYE_GLOW[state]
+    m.glow:SetVertexColor(c[1], c[2], c[3])
+    m:Show()
+    if m.pulse then
+        if state == "inside" then
+            if not m.pulse:IsPlaying() then m.pulse:Play() end
+        elseif m.pulse:IsPlaying() then
+            m.pulse:Stop()
+            m.glow:SetAlpha(1)
+        end
+    end
+end
+
+-- Place a light where the distance text would go, by the Position setting.
+local function PlaceLight(m, anchor)
+    local pos = db.distancePosition or "right"
+    if m.rlPos == pos and m.rlAnchor == anchor then return end
+    m.rlPos, m.rlAnchor = pos, anchor
+    m:ClearAllPoints()
+    if pos == "below" then
+        m:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
+    elseif pos == "above" then
+        m:SetPoint("BOTTOM", anchor, "TOP", 0, 2)
+    elseif pos == "left" then
+        m:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+    else
+        m:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
+    end
+end
+
+-- The range, as numbers or as the light.
+local function ShowDistance(fs, light, anchor, text, low, high)
+    StyleDistance(fs, anchor)
+    if db.distanceStyle == "light" then
+        fs:SetText("")
+        PlaceLight(light, anchor)
+        SetLight(light, LightBand(low, high), db.distanceSize or 14)
+    else
+        SetLight(light, nil)
+        fs:SetText(text or "")
+        ColorDistance(fs, low, high)
+    end
 end
 
 -- A plate's icons, or none if the grid leaves them off this plate.
@@ -1037,11 +1160,9 @@ end
 
 local function UpdatePlateDistance(row, unit)
     if row.aggro then ShowAggroMark(row.aggro, row.showAggro and AggroState(unit) or nil) end
-    StyleDistance(row.distance, row)
     local text, low, high
     if row.showDistance then text, low, high = DistanceText(unit) end
-    row.distance:SetText(text or "")
-    ColorDistance(row.distance, low, high)
+    ShowDistance(row.distance, row.rangeLight, row, text, low, high)
 end
 
 local function OnPlateAdded(unit)
@@ -1052,7 +1173,8 @@ local function OnPlateAdded(unit)
     if not row then
         row = CreateFrame("Frame", nil, plate)
         row:SetFrameLevel(plate:GetFrameLevel() + 10)
-        row.aggro = MakeAggroMark(row)
+        row.aggro = MakeAggroEye(row)
+        row.rangeLight = MakeLight(row)
         row.distance = row:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         row.distance:SetPoint("LEFT", row, "RIGHT", 4, 0)
         plateRows[plate] = row
@@ -1123,7 +1245,8 @@ panel:Hide()
 panel.row = CreateFrame("Frame", nil, panel)
 panel.row:SetPoint("CENTER")
 
-panel.aggro = MakeAggroMark(panel.row)
+panel.aggro = MakeAggroEye(panel.row)
+panel.rangeLight = MakeLight(panel.row)
 panel.distance = panel:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
 panel.distance:SetPoint("BOTTOM", panel, "TOP", 0, 0)
 
@@ -1198,12 +1321,10 @@ local function UpdatePanel()
         return
     end
     local hasTarget = Truthy(UnitExists("target"), false)
-    StyleDistance(panel.distance, panel.row)
     ShowAggroMark(panel.aggro, showAggro and hasTarget and AggroState("target") or nil)
     local text, low, high
     if showDistance and hasTarget then text, low, high = DistanceText("target") end
-    panel.distance:SetText(text or "")
-    ColorDistance(panel.distance, low, high)
+    ShowDistance(panel.distance, panel.rangeLight, panel.row, text, low, high)
     if not db.locked then
         -- Unlocked: always visible so it can be positioned.
         panel:Show()
@@ -1538,7 +1659,7 @@ local function BuildContent()
     -- Where each part shows: a grid of parts by place.
     Heading("Where to show")
     local GRID_COLS = { { "all", "All" }, { "target", "Target" }, { "focus", "Focus" }, { "panel", "Panel" } }
-    local GRID_ROWS = { { "icons", "Spell icons" }, { "distance", "Range text" }, { "aggro", "Aggro light" } }
+    local GRID_ROWS = { { "icons", "Spell icons" }, { "distance", "Range" }, { "aggro", "Aggro eye" } }
     local gridX, gridW = 112, 42
     for i, col in ipairs(GRID_COLS) do
         local h = left:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1602,15 +1723,26 @@ local function BuildContent()
         y = y - 30
     end
 
-    Heading("Aggro light")
+    Heading("Aggro eye")
     local aggroNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aggroNote:SetPoint("TOPLEFT", 20, y)
     aggroNote:SetWidth(LEFT_W - 60)
     aggroNote:SetJustifyH("LEFT")
-    aggroNote:SetText("Turn it on in Where to show. A light on red mobs: yellow within the warning distance of their aggro range, red and pulsing inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    aggroNote:SetText("Turn it on in Where to show. The dungeon finder eye on red mobs: searching, on a yellow glow, within the warning distance of their aggro range; fixed on you, on a pulsing red glow, inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
     y = y - 66
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
-    Slider("Aggro light size", "aggroSize", 6, 30)
+    Slider("Aggro eye size", "aggroSize", 10, 40)
+
+    Heading("Range")
+    Cycle("Show as", "distanceStyle", { "numbers", "light" }, { numbers = "Numbers", light = "Light" })
+    local lightNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    lightNote:SetPoint("TOPLEFT", 20, y)
+    lightNote:SetWidth(LEFT_W - 60)
+    lightNote:SetJustifyH("LEFT")
+    lightNote:SetText("Light: green while the mob is within the first distance, yellow within the second, red beyond. Its size is the Text size below.")
+    y = y - 40
+    Slider("Green up to (yards)", "lightGreen", 1, 45)
+    Slider("Yellow up to (yards)", "lightYellow", 1, 45)
 
     Heading("Distance text")
     Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
@@ -1690,7 +1822,8 @@ local function BuildContent()
     local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
 
     local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
-    prow.aggro = MakeAggroMark(prow)
+    prow.aggro = MakeAggroEye(prow)
+    prow.rangeLight = MakeLight(prow)
     prow.aggro:ClearAllPoints()
     prow.aggro:SetPoint("RIGHT", mockBar, "LEFT", -5, 0)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
@@ -1834,10 +1967,12 @@ local function BuildContent()
                 icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
         end
-        StyleDistance(prow.distance, prow)
         ShowAggroMark(prow.aggro, ShowOnAnyPlate("aggro") and "near" or nil)
-        prow.distance:SetText(ShowOnAnyPlate("distance") and FormatDistance(10, 15) or "")
-        ColorDistance(prow.distance, 10, 15)
+        if ShowOnAnyPlate("distance") then
+            ShowDistance(prow.distance, prow.rangeLight, prow, FormatDistance(10, 15), 10, 15)
+        else
+            ShowDistance(prow.distance, prow.rangeLight, prow, nil, nil, nil)
+        end
         local plateIcons = ShowOnAnyPlate("icons")
         for i = 1, prow.count or 0 do prow.icons[i]:SetShown(plateIcons) end
         prow:Show()
@@ -2614,6 +2749,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         if not db.offsetMoved then
             if db.plateOffsetY == -2 then db.plateOffsetY = nil end
             db.offsetMoved = true
+        end
+        -- 1.16.0: the aggro light became the eye, which wants more room.
+        if not db.aggroEyeSized then
+            if db.aggroSize == 12 then db.aggroSize = nil end
+            db.aggroEyeSized = true
         end
         -- 1.15.0: the scattered on/off checkboxes became the Where to show grid.
         if not db.show then
