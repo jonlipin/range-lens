@@ -401,7 +401,8 @@ local DEFAULTS = {
     distanceColor = "white",
     distanceSize = 14,
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
-    aggroWarning = false,       -- "!" when you are inside a red mob's estimated aggro radius
+    aggroWarning = false,       -- "!" near (yellow) and inside (red) a red mob's estimated aggro radius
+    aggroWarnYards = 5,         -- how many yards before the estimated edge the yellow warning starts
     minimap = true,         -- minimap button
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
@@ -902,14 +903,32 @@ local function AggroRadius(unit)
     return math.max(AGGRO_MIN, math.min(AGGRO_MAX, AGGRO_BASE - (mine - theirs)))
 end
 
--- True only when a distance check proves you are inside the estimated radius.
-local function InAggroRange(unit)
-    if not db.aggroWarning then return false end
-    if IsStealthed and Truthy(IsStealthed(), true) then return false end
-    if Truthy(UnitAffectingCombat(unit), true) then return false end
+-- "inside" when a distance check proves you are inside the estimated radius,
+-- "near" when one proves you are within the warning distance of its edge,
+-- otherwise nil. Checks only ever light it late, never early.
+local function AggroState(unit)
+    if not db.aggroWarning then return nil end
+    if IsStealthed and Truthy(IsStealthed(), true) then return nil end
+    if Truthy(UnitAffectingCombat(unit), true) then return nil end
     local radius = AggroRadius(unit)
-    local c = radius and CheckerFor(radius)
-    return c ~= nil and RunChecker(c, unit) == true
+    if not radius then return nil end
+    local inside = CheckerFor(radius)
+    if inside and RunChecker(inside, unit) == true then return "inside" end
+    local warn = db.aggroWarnYards or 5
+    if warn > 0 then
+        local near = CheckerFor(radius + warn)
+        if near and near ~= inside and RunChecker(near, unit) == true then return "near" end
+    end
+    return nil
+end
+
+local function ShowAggroMark(fs, state)
+    if state == "inside" then
+        fs:SetTextColor(1, 0.25, 0.2)
+    elseif state == "near" then
+        fs:SetTextColor(1, 0.85, 0.1)
+    end
+    fs:SetShown(state ~= nil)
 end
 
 local function MakeAggroMark(parent)
@@ -924,7 +943,7 @@ local function MakeAggroMark(parent)
 end
 
 local function UpdatePlateDistance(row, unit)
-    if row.aggro then row.aggro:SetShown(InAggroRange(unit)) end
+    if row.aggro then ShowAggroMark(row.aggro, AggroState(unit)) end
     StyleDistance(row.distance, row)
     local text, low, high
     if db.plateDistance then text, low, high = DistanceText(unit) end
@@ -1076,7 +1095,7 @@ local function UpdatePanel()
         return
     end
     StyleDistance(panel.distance, panel.row)
-    panel.aggro:SetShown(Truthy(UnitExists("target"), false) and InAggroRange("target"))
+    ShowAggroMark(panel.aggro, Truthy(UnitExists("target"), false) and AggroState("target") or nil)
     local text, low, high
     if db.showDistance and Truthy(UnitExists("target"), false) then text, low, high = DistanceText("target") end
     panel.distance:SetText(text or "")
@@ -1452,13 +1471,14 @@ local function BuildContent()
     end
 
     Heading("Aggro warning")
-    Check("Show \"!\" inside aggro range", "aggroWarning", FullRefresh)
+    Check("Warn before aggro range", "aggroWarning", FullRefresh)
     local aggroNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aggroNote:SetPoint("TOPLEFT", 20, y)
     aggroNote:SetWidth(LEFT_W - 60)
     aggroNote:SetJustifyH("LEFT")
-    aggroNote:SetText("An estimate: red mobs only, out of stealth. About 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
-    y = y - 52
+    aggroNote:SetText("Yellow ! when you are within the warning distance of a red mob's aggro range, red ! inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    y = y - 66
+    Slider("Warn yards early", "aggroWarnYards", 0, 15)
 
     Heading("Distance text")
     Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
@@ -1681,7 +1701,7 @@ local function BuildContent()
             end
         end
         StyleDistance(prow.distance, prow)
-        prow.aggro:SetShown(db.aggroWarning and true or false)
+        ShowAggroMark(prow.aggro, db.aggroWarning and "near" or nil)
         prow.distance:SetText(db.plateDistance and FormatDistance(10, 15) or "")
         ColorDistance(prow.distance, 10, 15)
         prow:SetShown(db.plates and (prow.count or 0) > 0)
@@ -2330,7 +2350,7 @@ local function Slash(msg)
                 local row = activePlates[unit]
                 local radius = AggroRadius(unit)
                 if radius then
-                    Print(("  aggro estimate %d yd, inside: %s"):format(radius, tostring(InAggroRange(unit))))
+                    Print(("  aggro estimate %d yd (warning from %d), now: %s"):format(radius, radius + (db.aggroWarnYards or 5), tostring(AggroState(unit) or "clear")))
                 end
                 Print(("%s %s: attackable %s, icons %s | %s"):format(unit, tostring(UnitName(unit)),
                     Show(UnitCanAttack("player", unit)),

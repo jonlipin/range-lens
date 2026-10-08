@@ -1,3 +1,7 @@
+## 1.14.2 - 2026-10-08
+
+- The aggro warning now warns before you reach a mob's aggro range, not once you are in it: a yellow "!" when you are within a set distance of its estimated edge, turning red once you are inside. Set the distance with the new Warn yards early slider (0 to 15, default 5). The option is now called Warn before aggro range, and `/rl debug` shows where the warning starts for each mob.
+
 ## 1.14.1 - 2026-10-08
 
 - Fixed: the minimap button (and `/rl`) sometimes opened Range Lens's own standalone window instead of the game's options. The game's options window can take a moment to appear, and Range Lens checked too soon, decided it had failed, and used its own window for the rest of the session. It now always opens the game's options at the Range Lens page.
