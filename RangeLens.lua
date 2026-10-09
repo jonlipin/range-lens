@@ -408,6 +408,8 @@ local DEFAULTS = {
     lightGreen = 10,            -- range light: green while the mob is within this many yards
     lightYellow = 30,           -- ... yellow within this many, red beyond
     eyeGlow = true,             -- the glow behind the aggro eye
+    eyeOffsetX = 0,             -- the aggro eye's position, from just left of the health bar
+    eyeOffsetY = 0,
     lightGlow = true,           -- the soft halo around the range light
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
@@ -1087,6 +1089,15 @@ local function MakeAggroEye(parent)
     return m
 end
 
+-- Put the eye left of what it belongs to (a health bar, the panel's icons),
+-- moved by the eye position sliders. The eye is scaled, so offsets are divided
+-- by its scale to stay in screen units.
+local function AnchorEye(m, anchor)
+    local scale = (db.aggroSize or 20) / 45
+    m:ClearAllPoints()
+    m:SetPoint("RIGHT", anchor, "LEFT", (-5 + (db.eyeOffsetX or 0)) / scale, (db.eyeOffsetY or 0) / scale)
+end
+
 local function ShowAggroMark(m, state)
     -- No "safe": a light for being clear read as "safe to go".
     if state == "safe" then state = nil end
@@ -1198,8 +1209,7 @@ local function OnPlateAdded(unit)
     if row.aggro then
         -- The aggro light sits directly left of the health bar (its frame art
         -- reaches 2 past the bar).
-        row.aggro:ClearAllPoints()
-        row.aggro:SetPoint("RIGHT", PlateAnchor(plate), "LEFT", -5, 0)
+        AnchorEye(row.aggro, PlateAnchor(plate))
     end
     -- The options preview copies a real plate's size (see MeasurePlate).
     MeasurePlate(plate, row, PlateAnchor(plate))
@@ -1326,6 +1336,7 @@ local function UpdatePanel()
         return
     end
     local hasTarget = Truthy(UnitExists("target"), false)
+    AnchorEye(panel.aggro, panel.row)
     ShowAggroMark(panel.aggro, showAggro and hasTarget and AggroState("target") or nil)
     local text, low, high
     if showDistance and hasTarget then text, low, high = DistanceText("target") end
@@ -1738,6 +1749,8 @@ local function BuildContent()
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
     Slider("Aggro eye size", "aggroSize", 10, 40)
     Check("Eye glow", "eyeGlow", FullRefresh)
+    Slider("Eye left / right", "eyeOffsetX", -60, 60)
+    Slider("Eye up / down", "eyeOffsetY", -40, 40)
 
     Heading("Range")
     Cycle("Show as", "distanceStyle", { "numbers", "light" }, { numbers = "Numbers", light = "Light" })
@@ -1831,8 +1844,6 @@ local function BuildContent()
     local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
     prow.aggro = MakeAggroEye(prow)
     prow.rangeLight = MakeLight(prow)
-    prow.aggro:ClearAllPoints()
-    prow.aggro:SetPoint("RIGHT", mockBar, "LEFT", -5, 0)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -1974,6 +1985,7 @@ local function BuildContent()
                 icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
         end
+        AnchorEye(prow.aggro, mockBar)
         ShowAggroMark(prow.aggro, ShowOnAnyPlate("aggro") and "near" or nil)
         if ShowOnAnyPlate("distance") then
             ShowDistance(prow.distance, prow.rangeLight, prow, FormatDistance(10, 15), 10, 15)
@@ -2337,7 +2349,15 @@ local function PageOpen()
         and settingsPage:GetParent() ~= nil and settingsPage:IsVisible()
 end
 
+local optionsAfterCombat = false
+
 local function ToggleOptions()
+    -- The game will not open its options window for an addon during combat.
+    if InCombatLockdown() and not PageOpen() then
+        if not optionsAfterCombat then Print("Options will open when combat ends.") end
+        optionsAfterCombat = true
+        return
+    end
     if PageOpen() then
         -- Closing a Blizzard panel from addon code may be refused; its own Close button always works.
         if SettingsPanel and HideUIPanel then pcall(HideUIPanel, SettingsPanel) end
@@ -2708,13 +2728,12 @@ ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("PLAYER_TARGET_CHANGED")
 ev:RegisterEvent("CVAR_UPDATE")
 pcall(ev.RegisterEvent, ev, "PLAYER_FOCUS_CHANGED")
-ev:RegisterEvent("ADDON_ACTION_BLOCKED")
+ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Talent changes: re-read every spell's range (not every client has every event).
 for _, e in ipairs({ "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED" }) do
     pcall(ev.RegisterEvent, ev, e)
 end
-ev:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 
 local ready = false
 
@@ -2832,13 +2851,10 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         RefreshAllPlates()
     elseif event == "GET_ITEM_INFO_RECEIVED" then
         OnItemLoaded(arg1, arg2)
-    elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
-        -- The only call here that could be refused is CheckInteractDistance;
-        -- the item checks carry on without it.
-        if arg1 == ADDON_NAME and not interactBlocked then
-            interactBlocked = true
-            checkerCache = nil
-            Print("the game refused an interact distance check; using item checks only this session.")
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if optionsAfterCombat then
+            optionsAfterCombat = false
+            ToggleOptions()
         end
     end
 end)

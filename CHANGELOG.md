@@ -2,6 +2,12 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.16.2 - 2026-10-08
+
+- Fixed: opening the options in combat gave a UI error, because the game does not let an addon open its options window during combat. The minimap button and `/rl` now say the options will open when combat ends, and open them then.
+- Fixed: that blocked attempt also switched Range Lens's distance checks off for the rest of the session, so the range text and the aggro eye stopped showing until a reload. A blocked action no longer turns any checks off.
+- Eye position: Eye left / right and Eye up / down sliders move the aggro eye from its place just left of the health bar, on nameplates, the target panel and the preview.
+
 ## 1.16.1 - 2026-10-08
 
 - Glow on or off: Eye glow (under Aggro eye) turns the yellow or red glow behind the aggro eye on or off, and Light glow (under Range) the soft halo around the range light. Both are on unless you turn them off.
