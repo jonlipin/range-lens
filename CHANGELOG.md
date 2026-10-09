@@ -2,6 +2,10 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.16.1 - 2026-10-08
+
+- Glow on or off: Eye glow (under Aggro eye) turns the yellow or red glow behind the aggro eye on or off, and Light glow (under Range) the soft halo around the range light. Both are on unless you turn them off.
+
 ## 1.16.0 - 2026-10-08
 
 - The aggro warning is the dungeon finder eye now, animated as the game animates it in its own queue button: searching, on a yellow glow, as you near a mob's estimated aggro range, and fixed on you, on a pulsing red glow, inside it. The size slider is now Aggro eye size (10 to 40, default 20).

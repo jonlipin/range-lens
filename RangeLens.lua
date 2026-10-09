@@ -407,6 +407,8 @@ local DEFAULTS = {
     distanceStyle = "numbers",  -- range shown as "numbers" or as a coloured "light"
     lightGreen = 10,            -- range light: green while the mob is within this many yards
     lightYellow = 30,           -- ... yellow within this many, red beyond
+    eyeGlow = true,             -- the glow behind the aggro eye
+    lightGlow = true,           -- the soft halo around the range light
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
     show = {
@@ -1005,6 +1007,7 @@ local function SetLight(m, color, size)
         m:SetScale(size / 12)
     end
     local c = LIGHT_COLORS[color]
+    m.halo:SetShown(db.lightGlow ~= false)
     m.halo:SetVertexColor(c[1], c[2], c[3])
     m.core:SetColorTexture(c[1], c[2], c[3], 1)
     m:Show()
@@ -1106,10 +1109,12 @@ local function ShowAggroMark(m, state)
         return
     end
     local c = EYE_GLOW[state]
+    local glow = db.eyeGlow ~= false
+    m.glow:SetShown(glow)
     m.glow:SetVertexColor(c[1], c[2], c[3])
     m:Show()
     if m.pulse then
-        if state == "inside" then
+        if state == "inside" and glow then
             if not m.pulse:IsPlaying() then m.pulse:Play() end
         elseif m.pulse:IsPlaying() then
             m.pulse:Stop()
@@ -1732,6 +1737,7 @@ local function BuildContent()
     y = y - 66
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
     Slider("Aggro eye size", "aggroSize", 10, 40)
+    Check("Eye glow", "eyeGlow", FullRefresh)
 
     Heading("Range")
     Cycle("Show as", "distanceStyle", { "numbers", "light" }, { numbers = "Numbers", light = "Light" })
@@ -1743,6 +1749,7 @@ local function BuildContent()
     y = y - 40
     Slider("Green up to (yards)", "lightGreen", 1, 45)
     Slider("Yellow up to (yards)", "lightYellow", 1, 45)
+    Check("Light glow", "lightGlow", FullRefresh)
 
     Heading("Distance text")
     Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
