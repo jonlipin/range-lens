@@ -407,7 +407,7 @@ local DEFAULTS = {
     distanceStyle = "numbers",  -- range shown as "numbers" or as a coloured "light"
     lightGreen = 10,            -- range light: green while the mob is within this many yards
     lightYellow = 30,           -- ... yellow within this many, red beyond
-    eyeGlow = true,             -- the glow behind the aggro eye
+    eyeGlowMode = "always",    -- the glow behind the aggro eye: "always", "inside" (only in aggro range) or "off"
     eyeOffsetX = 0,             -- the aggro eye's position, from just left of the health bar
     eyeOffsetY = 0,
     lightGlow = true,           -- the soft halo around the range light
@@ -1120,7 +1120,8 @@ local function ShowAggroMark(m, state)
         return
     end
     local c = EYE_GLOW[state]
-    local glow = db.eyeGlow ~= false
+    local mode = db.eyeGlowMode or "always"
+    local glow = mode == "always" or (mode == "inside" and state == "inside")
     m.glow:SetShown(glow)
     m.glow:SetVertexColor(c[1], c[2], c[3])
     m:Show()
@@ -1748,7 +1749,7 @@ local function BuildContent()
     y = y - 66
     Slider("Warn yards early", "aggroWarnYards", 0, 15)
     Slider("Aggro eye size", "aggroSize", 10, 40)
-    Check("Eye glow", "eyeGlow", FullRefresh)
+    Cycle("Eye glow", "eyeGlowMode", { "always", "inside", "off" }, { always = "Always", inside = "Only in range", off = "Off" })
     Slider("Eye left / right", "eyeOffsetX", -60, 60)
     Slider("Eye up / down", "eyeOffsetY", -40, 40)
 
@@ -2776,6 +2777,8 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
             if db.plateOffsetY == -2 then db.plateOffsetY = nil end
             db.offsetMoved = true
         end
+        -- 1.16.3: the eye glow on/off became Always / Only in range / Off.
+        if db.eyeGlow == false and db.eyeGlowMode == nil then db.eyeGlowMode = "off" end
         -- 1.16.0: the aggro light became the eye, which wants more room.
         if not db.aggroEyeSized then
             if db.aggroSize == 12 then db.aggroSize = nil end

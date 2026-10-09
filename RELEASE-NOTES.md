@@ -1,3 +1,7 @@
+## 1.16.3 - 2026-10-08
+
+- Eye glow is a choice now: Always (yellow near, red inside), Only in range (no glow while you approach, just the searching eye; the pulsing red glow only once you are inside the estimated aggro range), or Off. If you had turned the glow off, it stays off.
+
 ## 1.16.2 - 2026-10-08
 
 - Fixed: opening the options in combat gave a UI error, because the game does not let an addon open its options window during combat. The minimap button and `/rl` now say the options will open when combat ends, and open them then.
