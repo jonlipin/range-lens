@@ -10,7 +10,7 @@
 -- Region:SetAlphaFromBoolean without ever inspecting it. Cooldowns go to the
 -- engine as duration objects, so their numbers are never read either.
 
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
 
 ---------------------------------------------------------------------------
 -- API shims
@@ -21,6 +21,11 @@ local isSecret = issecretvalue or function() return false end
 -- The saved settings (this character's) and the character table; set at
 -- ADDON_LOADED. Declared here so every function below can see them.
 local db, cdb
+
+-- For RangeLens_Skins.lua: the settings, its status lines, and every icon made.
+function ns.DB() return db end
+ns.report = {}
+ns.icons = setmetatable({}, { __mode = "k" })
 
 -- Plain boolean test that tolerates secrets: a secret yields `fallback`.
 local function Truthy(v, fallback)
@@ -49,10 +54,10 @@ local function SpellInfo(spell)
     return name, icon, id, minRange, maxRange
 end
 
--- Spells centred on you (or a cone in front of you) have no target range, so
+-- Spells centered on you (or a cone in front of you) have no target range, so
 -- the game's range check answers nil for them. Their radius in yards, GENERATED
 -- from the game's own spell data for build 1.60.1.70009: every spell on a class
--- skill line whose effect hits enemies in an area centred on you, at your feet,
+-- skill line whose effect hits enemies in an area centered on you, at your feet,
 -- in a cone in front of you, or through a spell it pulses (Hellfire). Spells
 -- aimed at a target (Blizzard, Intimidating Shout) are left to the game's own
 -- range check. The radius is the smallest over all ranks.
@@ -112,12 +117,12 @@ local function SetOverride(name, yards)
     RangeLensDB.override[name] = yards
 end
 
--- How far a self-centred spell does what the icon promises.
+-- How far a self-centered spell does what the icon promises.
 local function AoeReach(name, radius)
     return math.max(1, radius + ReachAdjust(name))
 end
 
--- Talents that widen a self-centred spell, best rank first: { talent spell ID, factor }.
+-- Talents that widen a self-centered spell, best rank first: { talent spell ID, factor }.
 -- Arctic Reach (Frost): +10% / +20% radius for Frost Nova and Cone of Cold.
 local ARCTIC_REACH = { { 16758, 1.2 }, { 16757, 1.1 } }
 local AOE_TALENTS = { ["Frost Nova"] = ARCTIC_REACH, ["Cone of Cold"] = ARCTIC_REACH }
@@ -130,7 +135,7 @@ end
 
 ---------------------------------------------------------------------------
 -- Distance checks for units without a spell range test. Both kinds and all
--- the distances come from LibRangeCheck-3.0 by mitch0 and the WoWUIDev community (MIT licence,
+-- the distances come from LibRangeCheck-3.0 by mitch0 and the WoWUIDev community (MIT license,
 -- github.com/WeakAuras/LibRangeCheck-3.0), whose authors measured them in game:
 --  * C_Item.IsItemInRange with an item whose use range is known. The item does
 --    not have to be in your bags, but its data has to be loaded first.
@@ -257,9 +262,9 @@ local DIST_FORMATS = { "range", "max", "less", "mid" }
 local DIST_FORMAT_LABEL = { range = "8-12", max = "12", less = "<12", mid = "~10" }
 local DIST_POSITIONS = { "right", "left", "below", "above" }
 local DIST_POSITION_LABEL = { right = "Right of icons", left = "Left of icons", below = "Below icons", above = "Above icons" }
-local DIST_COLORS = { "white", "gold", "grey", "blue", "distance" }
-local DIST_COLOR_LABEL = { white = "White", gold = "Gold", grey = "Grey", blue = "Light blue", distance = "By distance" }
-local DIST_COLOR_RGB = { white = { 1, 1, 1 }, gold = { 1, 0.82, 0 }, grey = { 0.7, 0.7, 0.7 }, blue = { 0.45, 0.75, 1 } }
+local DIST_COLORS = { "white", "gold", "gray", "blue", "distance" }
+local DIST_COLOR_LABEL = { white = "White", gold = "Gold", gray = "Gray", blue = "Light blue", distance = "By distance" }
+local DIST_COLOR_RGB = { white = { 1, 1, 1 }, gold = { 1, 0.82, 0 }, gray = { 0.7, 0.7, 0.7 }, blue = { 0.45, 0.75, 1 } }
 
 local function FormatDistance(low, high)
     local f = db.distanceFormat
@@ -292,7 +297,7 @@ local function DistanceColor(low, high)
     return 1, 0.9 - 0.6 * k, 0.2 + 0.1 * k
 end
 
--- Colour a distance text: the chosen colour, or by the distance it shows.
+-- Color a distance text: the chosen color, or by the distance it shows.
 local function ColorDistance(fs, low, high)
     if db.distanceColor ~= "distance" or not low then return end
     fs:SetTextColor(DistanceColor(low, high))
@@ -317,7 +322,7 @@ local function StyleDistance(fs, anchor)
     else
         fs:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
     end
-    local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white -- "distance" is coloured per update
+    local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white -- "distance" is colored per update
     fs:SetTextColor(rgb[1], rgb[2], rgb[3])
     if fs.SetTextHeight then fs:SetTextHeight(size) end
     fs:SetShadowColor(0, 0, 0, shadow > 0 and 1 or 0)
@@ -337,7 +342,7 @@ local function DistanceText(unit)
     if low > 0 then return FormatDistance(low, nil), low, nil end
 end
 
--- Radius of a self-centred spell: the table first, then "within N yards" in its description.
+-- Radius of a self-centered spell: the table first, then "within N yards" in its description.
 local function AoeRadius(name, id)
     local r = name and AOE_RADIUS[name]
     if r then
@@ -404,7 +409,7 @@ local DEFAULTS = {
     aggroWarning = false,       -- "!" near (yellow) and inside (red) a red mob's estimated aggro radius
     aggroWarnYards = 5,         -- how many yards before the estimated edge the yellow warning starts
     aggroSize = 20,             -- the aggro eye's size
-    distanceStyle = "numbers",  -- range shown as "numbers" or as a coloured "light"
+    distanceStyle = "numbers",  -- range shown as "numbers" or as a colored "light"
     lightGreen = 10,            -- range light: green while the mob is within this many yards
     lightYellow = 30,           -- ... yellow within this many, red beyond
     eyeGlowMode = "always",    -- the glow behind the aggro eye: "always", "inside" (only in aggro range) or "off"
@@ -425,6 +430,8 @@ local DEFAULTS = {
     plateOffsetY = -6,
     plateOffsetX = 0,
     outAlpha = 1,           -- opacity of the out-of-range look
+    style = "auto",         -- window style: "auto" (EllesmereUI when running), "blizzard" or "dark"
+    darkAlpha = 0.92,       -- the Dark style's background opacity
     interval = 0.1,         -- seconds between range checks
     point = { "CENTER", "CENTER", 0, -190 },
 }
@@ -537,7 +544,7 @@ local EDGE_FILE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
 local OUT_R, OUT_G, OUT_B = 0.64, 0.15, 0.15
 local OOR_ALPHA = 0.5
 local OVERLAY_X, OVERLAY_Y = 9 / 50, 8 / 50
--- The swipe art is a plain white shape the colour is laid over. The manager's
+-- The swipe art is a plain white shape the color is laid over. The manager's
 -- cooldown swipe is black at 0.7; this one is darker, and red while out of range.
 local SWIPE_NORMAL = { 0, 0, 0, 0.85 }
 local SWIPE_OUT = { 0.6, 0.05, 0.05, 0.85 }
@@ -602,6 +609,9 @@ local function CreateIcon(parent)
     f.range = f.textLayer:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     f.range:SetPoint("BOTTOM", f, "BOTTOM", 0, 2)
 
+    f.mask = mask
+    ns.icons[f] = true
+    if ns.SkinIcon then ns.SkinIcon(f) end
     return f
 end
 
@@ -634,6 +644,7 @@ local function SizeIcon(icon, size, numbers)
         local font = CountdownFont(size)
         if _G[font] then pcall(icon.cd.SetCountdownFont, icon.cd, font) end
     end
+    if ns.SizeIconEdge then ns.SizeIconEdge(icon) end
 end
 
 local function SetIconSpell(icon, spell)
@@ -785,7 +796,25 @@ local plateRows = {}   -- [nameplate frame] = row
 local activePlates = {} -- [unit token] = row
 local plateUnits = {}  -- [unit token] = true for every nameplate currently shown
 
+-- EllesmereUI's Nameplates module draws its own plate over the game's and parks the game's
+-- health bar off screen, so the icons follow its bar instead. Its plate is a child of the game's
+-- nameplate frame that keeps that frame in .nameplate and its health bar in .health (read
+-- only; nothing of it is changed). ns.euiNameplates is set at login.
+function ns.EuiPlate(plate)
+    if not ns.euiNameplates or not plate then return nil end
+    local ok, found = pcall(function()
+        for _, child in ipairs({ plate:GetChildren() }) do
+            if rawget(child, "nameplate") == plate and type(rawget(child, "health")) == "table" and child:IsShown() then
+                return child
+            end
+        end
+    end)
+    if ok then return found end
+end
+
 local function PlateAnchor(plate)
+    local eui = ns.EuiPlate(plate)
+    if eui then return eui.health end
     local uf = plate.UnitFrame
     if uf and not uf:IsForbidden() and uf.healthBar then
         return uf.healthBar
@@ -837,9 +866,259 @@ local function PlateSettings()
     return size, style
 end
 
-local function PlateSettingsKey()
-    local size, style = PlateSettings()
-    return style .. ":" .. size
+-- Whether the preview should be EllesmereUI's plate: once one of its plates has been seen, or
+-- while it is loaded and no plate has been seen yet.
+function ns.EuiLook()
+    return (ns.euiSeen or ns.euiNameplates) and true or false
+end
+
+-- EllesmereUI's nameplate settings, read from its live profile (EllesmereUI.Lite keeps every
+-- database it opened in _dbRegistry), for drawing the options preview. Read only; nil when
+-- it cannot be found.
+function ns.EuiProfile()
+    local ok, profile = pcall(function()
+        local reg = EllesmereUI and EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry
+        if type(reg) ~= "table" then return nil end
+        for _, entry in ipairs(reg) do
+            if type(entry) == "table" and entry.folder == "EllesmereUINameplates" and type(entry.profile) == "table" then
+                return entry.profile
+            end
+        end
+    end)
+    if ok then return profile end
+end
+
+-- Its defaults for the settings the preview draws, for anything the profile does not hold.
+ns.EUI_DEFAULTS = {
+    barW = 150, healthBarWidth = 6, healthBarHeight = 17,
+    textSlotTop = "enemyName", textSlotLeft = "level", textSlotRight = "healthPercent",
+    textSlotCenter = "none", textSlotBottomLeft = "none", textSlotBottomRight = "none",
+    textSlotTopSize = 12, textSlotTopYOffset = 3, textSlotSize = 10, nameYOffset = 0,
+    neutral = { r = 0.81, g = 0.72, b = 0.19 }, enemyInCombat = { r = 0.8, g = 0.137, b = 0.137 },
+    darkenEnemiesOOC = true, darkenOOCColor = { r = 0.5, g = 0.5, b = 0.5 },
+    bgColor = { r = 0.12, g = 0.12, b = 0.12 }, bgAlpha = 1,
+    showBorder = true, borderSize = 1, borderColor = { r = 0.067, g = 0.067, b = 0.067 },
+    targetGlowStyle = "ellesmereui", targetGlowColor = { r = 0.4117, g = 0.6667, b = 1 }, targetGlowAlpha = 1,
+    font = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF",
+}
+ns.EUI_SLOTS = { "Top", "Left", "Right", "Center", "BottomLeft", "BottomRight" }
+
+-- What EllesmereUI's plate for the preview's mob looks like. The mob is your target when you
+-- have one you could fight, otherwise a hostile stand-in, as out of combat.
+function ns.EuiPreviewSpec(look)
+    local p, D = ns.EuiProfile(), ns.EUI_DEFAULTS
+    local function Get(k)
+        local v = p and p[k]
+        if v == nil then v = D[k] end
+        return v
+    end
+    local function Num(k, fallback) local v = Get(k) return type(v) == "number" and v or fallback end
+    local function Color(k)
+        local c = Get(k)
+        if type(c) ~= "table" then c = D[k] end
+        if type(c) ~= "table" then return { 1, 1, 1 } end
+        return { c.r or 1, c.g or 1, c.b or 1 }
+    end
+    local spec = { settings = p ~= nil }
+    spec.w = D.barW + Num("healthBarWidth", D.healthBarWidth)
+    spec.h = Num("healthBarHeight", D.healthBarHeight)
+    spec.variant = (Get("useClassicStyle") == true and "classic") or (Get("useBlizzardStyle") == true and "blizzard") or nil
+    spec.slots = {}
+    for _, key in ipairs(ns.EUI_SLOTS) do
+        local k = "textSlot" .. key
+        spec.slots[key] = {
+            el = Get(k) or "none",
+            size = Num(k .. "Size", key == "Top" and D.textSlotTopSize or D.textSlotSize),
+            x = Num(k .. "XOffset", 0),
+            y = Num(k .. "YOffset", key == "Top" and D.textSlotTopYOffset or 0),
+            color = Color(k .. "Color"),
+        }
+    end
+    spec.nameYOff = Num("nameYOffset", 0)
+    spec.bg, spec.bgA = Color("bgColor"), Num("bgAlpha", 1)
+    if Get("showBorder") ~= false then spec.border = { size = Num("borderSize", 1), color = Color("borderColor") } end
+    spec.glowStyle = Get("targetGlowStyle")
+    spec.glow = Color("targetGlowColor")
+    spec.glowA = Num("targetGlowAlpha", 1)
+    -- The font as a real plate's name has it (EllesmereUI's own functions are not called), else its setting.
+    local measuredFont = look and look.font
+    spec.font = (measuredFont and measuredFont[1]) or Get("font") or D.font
+    local flags = (measuredFont and type(measuredFont[3]) == "string") and measuredFont[3] or "OUTLINE"
+    spec.flags = strtrim((flags:gsub(",?%s*SLUG", "")))
+    -- The mob.
+    spec.name, spec.level, spec.health = "Elder Mottled Boar", "8", 152
+    local hostile = true
+    if Truthy(UnitExists("target"), false) and Truthy(UnitCanAttack("player", "target"), false) then
+        spec.target = true
+        local name = UnitName("target")
+        if type(name) == "string" and not isSecret(name) then spec.name = name end
+        local level = UnitLevel("target")
+        if type(level) == "number" and not isSecret(level) then spec.level = level > 0 and tostring(level) or "??" end
+        local maxHp = UnitHealthMax and UnitHealthMax("target")
+        if type(maxHp) == "number" and not isSecret(maxHp) then spec.health = maxHp end
+        local reaction = UnitReaction("target", "player")
+        if type(reaction) == "number" and not isSecret(reaction) and reaction == 4 then hostile = false end
+        -- The real plate's own bar color, when it can be read.
+        local np = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("target")
+        local eui = np and ns.EuiPlate(np)
+        if eui then
+            local okC, r, g, b = pcall(eui.health.GetStatusBarColor, eui.health)
+            if okC and type(r) == "number" and not isSecret(r) and not isSecret(g) and not isSecret(b) then
+                spec.color, spec.liveColor = { r, g, b }, true
+            end
+        end
+    end
+    if not spec.color then
+        if not hostile then
+            spec.color = Color("neutral")
+        else
+            local c = Color("enemyInCombat")
+            -- Out of combat EllesmereUI dims enemies (to 60%), or recolors them.
+            if Get("darkenEnemiesOOC") ~= false then
+                if Get("darkenOOCRecolor") == true then c = Color("darkenOOCColor")
+                else c = { c[1] * 0.6, c[2] * 0.6, c[3] * 0.6 } end
+            end
+            spec.color = c
+        end
+    end
+    return spec
+end
+
+-- The text an element shows, for the preview's mob.
+function ns.EuiSlotText(el, spec)
+    local pct, num = "100%", tostring(spec.health)
+    if AbbreviateNumbers then
+        local ok, short = pcall(AbbreviateNumbers, spec.health)
+        if ok and type(short) == "string" then num = short end
+    end
+    if el == "enemyName" then return spec.name end
+    if el == "level" then return spec.level end
+    if el == "healthPercent" then return pct end
+    if el == "healthPercentNoSign" then return "100" end
+    if el == "healthNumber" then return num end
+    if el == "healthPctNum" then return pct .. " | " .. num end
+    if el == "healthNumPct" then return num .. " | " .. pct end
+    if el == "healthPctNumDash" then return pct .. " - " .. num end
+    if el == "healthNumPctDash" then return num .. " - " .. pct end
+    return ""
+end
+
+-- Draws EllesmereUI's plate on the preview's mock pieces, at the size it is on screen (the
+-- nameplate frame's scale, measured from a real plate, else the interface's). Returns the
+-- label's note: "Matches" only when both its settings and a real plate were read.
+function ns.DrawEuiPreview(mock, look, measured, pe)
+    local spec = ns.EuiPreviewSpec(look)
+    ns.lastEuiSpec, ns.lastEuiMock = spec, mock -- for /rangelens debug and the tests
+    local base = look.baseEff
+    if type(base) ~= "number" or base <= 0 then
+        local ok, s = pcall(UIParent.GetEffectiveScale, UIParent)
+        base = (ok and type(s) == "number" and s > 0) and s or pe
+    end
+    local k = (look.euiScale and look.euiScale > 0) and look.euiScale or 1 -- its plate's own scale
+    local rowScale = look.rowScale or 1
+    mock.plate:SetScale(rowScale * base / pe)
+    local u = k / rowScale -- one unit of EllesmereUI's plate in the mock plate's units
+    local bar, frame = mock.bar, mock.frame
+    bar:SetSize(spec.w * u, spec.h * u)
+    bar:SetTexture("Interface\\Buttons\\WHITE8X8")
+    bar:SetVertexColor(spec.color[1], spec.color[2], spec.color[3])
+    -- The edge (or its empty-bar color where there is none).
+    frame:ClearAllPoints()
+    frame:SetTexCoord(0, 1, 0, 1)
+    local edge = spec.border and spec.border.size * u or 0
+    frame:SetPoint("TOPLEFT", bar, "TOPLEFT", -edge, edge)
+    frame:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", edge, -edge)
+    if spec.border then
+        local c = spec.border.color
+        frame:SetColorTexture(c[1], c[2], c[3], 1)
+    else
+        frame:SetColorTexture(spec.bg[1], spec.bg[2], spec.bg[3], spec.bgA)
+    end
+    frame:Show()
+    -- The texts, in its slots: inside the bar left, right and center, above it and under its corners.
+    mock.texts = mock.texts or {}
+    for _, key in ipairs(ns.EUI_SLOTS) do
+        local slot = spec.slots[key]
+        local fs = mock.texts[key]
+        if not fs then
+            fs = mock.plate:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            mock.texts[key] = fs
+        end
+        local text = ns.EuiSlotText(slot.el, spec)
+        if text == "" then
+            fs:Hide()
+        else
+            if not pcall(fs.SetFont, fs, spec.font, slot.size * u, spec.flags) then
+                pcall(fs.SetFont, fs, STANDARD_TEXT_FONT, slot.size * u, "OUTLINE")
+            end
+            fs:SetTextColor(slot.color[1], slot.color[2], slot.color[3])
+            fs:ClearAllPoints()
+            local x, y = slot.x * u, slot.y * u
+            if key == "Top" then
+                fs:SetPoint("BOTTOM", bar, "TOP", x, (4 + spec.nameYOff) * u + y)
+            elseif key == "Left" then
+                fs:SetPoint("LEFT", bar, "LEFT", 4 * u + x, y)
+            elseif key == "Right" then
+                fs:SetPoint("RIGHT", bar, "RIGHT", -2 * u + x, y)
+            elseif key == "Center" then
+                fs:SetPoint("CENTER", bar, "CENTER", x, y)
+            elseif key == "BottomLeft" then
+                fs:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", x, -2 * u + y)
+            else
+                fs:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", x, -2 * u + y)
+            end
+            fs:SetText(text)
+            fs:Show()
+        end
+    end
+    -- Your target's plate carries the soft glow round it: four strips fading outward.
+    mock.glow = mock.glow or {}
+    local glowOn = spec.target and spec.glowStyle ~= "none" and spec.glowStyle ~= false
+    for i, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local t = mock.glow[i]
+        if not t then
+            t = mock.plate:CreateTexture(nil, "BACKGROUND", nil, -1)
+            mock.glow[i] = t
+        end
+        if glowOn then
+            local reach = 6 * u
+            local c, a = spec.glow, spec.glowA * 0.6
+            t:ClearAllPoints()
+            t:SetColorTexture(1, 1, 1, 1)
+            local okG = CreateColor and pcall(function()
+                local cin, cout = CreateColor(c[1], c[2], c[3], a), CreateColor(c[1], c[2], c[3], 0)
+                if side == "TOP" then t:SetGradient("VERTICAL", cin, cout)
+                elseif side == "BOTTOM" then t:SetGradient("VERTICAL", cout, cin)
+                elseif side == "LEFT" then t:SetGradient("HORIZONTAL", cout, cin)
+                else t:SetGradient("HORIZONTAL", cin, cout) end
+            end)
+            if not okG then t:SetColorTexture(c[1], c[2], c[3], a * 0.5) end
+            if side == "TOP" then
+                t:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 0, 0) t:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", 0, 0) t:SetHeight(reach)
+            elseif side == "BOTTOM" then
+                t:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 0, 0) t:SetPoint("TOPRIGHT", frame, "BOTTOMRIGHT", 0, 0) t:SetHeight(reach)
+            elseif side == "LEFT" then
+                t:SetPoint("TOPRIGHT", frame, "TOPLEFT", 0, 0) t:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", 0, 0) t:SetWidth(reach)
+            else
+                t:SetPoint("TOPLEFT", frame, "TOPRIGHT", 0, 0) t:SetPoint("BOTTOMLEFT", frame, "BOTTOMRIGHT", 0, 0) t:SetWidth(reach)
+            end
+            t:Show()
+        else
+            t:Hide()
+        end
+    end
+    -- What the label may claim.
+    if spec.variant then
+        return "|cffffd060Approximates EllesmereUI's " .. (spec.variant == "classic" and "Classic" or "Blizzard")
+            .. " style plate (its own art is not drawn here).|r"
+    elseif spec.settings and measured then
+        return "|cff80ff80Matches your EllesmereUI nameplates.|r"
+    elseif spec.settings then
+        return "|cffffd060Follows your EllesmereUI nameplate settings; the size is estimated until one is on screen.|r"
+    elseif measured then
+        return "|cffffd060Measured from an EllesmereUI nameplate; its texts are drawn where its defaults put them.|r"
+    end
+    return "|cffffd060Approximates EllesmereUI's default nameplate.|r"
 end
 
 -- Blizzard's horizontal and vertical scale for a Size, per Style (NamePlateConstants).
@@ -870,7 +1149,27 @@ local function MeasurePlate(plate, row, bar)
         and type(w) == "number" and w > 20 and type(h) == "number" and h > 2 then
         barScale, rowScale = barScale / plateScale, rowScale / plateScale
         RangeLensDB.plateLooks = RangeLensDB.plateLooks or {}
-        RangeLensDB.plateLooks[PlateSettingsKey()] = { w = w * barScale, h = h * barScale, rowScale = rowScale }
+        local look = { w = w * barScale, h = h * barScale, rowScale = rowScale }
+        -- EllesmereUI's plate: its name font and level box, for the preview (in the same units).
+        local eui = ns.EuiPlate(plate)
+        if eui then ns.euiSeen = true end
+        if eui then
+            look.eui = true
+            look.baseEff, look.euiScale = plateScale, barScale -- the plate's screen scale, and its own
+            pcall(function()
+                local path, size, flags = eui.name:GetFont()
+                if type(path) == "string" and type(size) == "number" then look.font = { path, size * barScale, flags } end
+                local box = rawget(eui, "_fvLevelBox")
+                if type(box) == "table" and box:IsShown() then look.levelW, look.levelH = box:GetWidth() * barScale, box:GetHeight() * barScale end
+                local point, rel, relPoint, x, y = eui.name:GetPoint(1)
+                if rel == eui.health and type(x) == "number" and type(y) == "number" then
+                    look.namePoint = { point, relPoint, x * barScale, y * barScale }
+                end
+            end)
+        end
+        local size, style = PlateSettings()
+        RangeLensDB.plateLooks[eui and "eui" or (style .. ":" .. size)] = look
+        if ns.RefreshPreview then ns.RefreshPreview() end
     end
 end
 
@@ -879,6 +1178,11 @@ end
 -- under other settings (scaled by Blizzard's tables), otherwise from defaults.
 local function PlateLook()
     local looks = RangeLensDB and RangeLensDB.plateLooks or {}
+    if ns.EuiLook() then
+        -- EllesmereUI's default plate: a 156 x 17 bar with a 28 wide level box 5 to its right.
+        if looks.eui then return looks.eui, true end
+        return { w = 156, h = 17, rowScale = 1, eui = true }, false
+    end
     local size, style = PlateSettings()
     local key = style .. ":" .. size
     if looks[key] then return looks[key], true end
@@ -886,8 +1190,10 @@ local function PlateLook()
     for other, look in pairs(looks) do
         local oStyle, oSize = other:match("^(%-?%d+):(%-?%d+)$")
         oStyle, oSize = tonumber(oStyle), tonumber(oSize)
-        local h0, v0 = PlateScale(oSize, oStyle)
-        return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
+        if oStyle and oSize then
+            local h0, v0 = PlateScale(oSize, oStyle)
+            return { w = look.w * h1 / h0, h = look.h * v1 / v0, rowScale = look.rowScale }, false
+        end
     end
     -- Blizzard's own sizes (Blizzard_NamePlates): the 190 wide plate holds the
     -- level badge and its gaps, leaving a 130 wide health bar at Medium (checked
@@ -956,7 +1262,7 @@ local function AggroState(unit)
     return "safe"
 end
 
--- A round coloured light: a solid disc cut by the game's round mask, a thin
+-- A round colored light: a solid disc cut by the game's round mask, a thin
 -- dark rim, a little shine, and a little of the soft glow (BonusChest-CircleGlow)
 -- behind it. Used for the range light.
 local LIGHT_COLORS = { green = { 0.25, 1, 0.35 }, yellow = { 1, 0.85, 0.1 }, red = { 1, 0.15, 0.1 } }
@@ -996,7 +1302,7 @@ local function MakeLight(parent)
     return m
 end
 
--- Colour (green / yellow / red) and size a light; nil hides it.
+-- Color (green / yellow / red) and size a light; nil hides it.
 local function SetLight(m, color, size)
     m.color = color
     if not color then
@@ -1015,7 +1321,7 @@ local function SetLight(m, color, size)
     m:Show()
 end
 
--- The range light's colour for a distance bracket, judged by its far end.
+-- The range light's color for a distance bracket, judged by its far end.
 local function LightBand(low, high)
     if not low then return nil end
     local far = high or math.huge
@@ -1182,7 +1488,7 @@ local function UpdatePlateDistance(row, unit)
     ShowDistance(row.distance, row.rangeLight, row, text, low, high)
 end
 
-local function OnPlateAdded(unit)
+local function OnPlateAdded(unit, settled)
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
     if not plate or plate:IsForbidden() then return end
 
@@ -1205,22 +1511,33 @@ local function OnPlateAdded(unit)
     end
     row.showIcons, row.showDistance, row.showAggro = icons, distance, aggro
 
+    local bar = PlateAnchor(plate)
     row:ClearAllPoints()
-    row:SetPoint("TOP", PlateAnchor(plate), "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+    row:SetPoint("TOP", bar, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
     if row.aggro then
         -- The aggro light sits directly left of the health bar (its frame art
         -- reaches 2 past the bar).
-        AnchorEye(row.aggro, PlateAnchor(plate))
+        AnchorEye(row.aggro, bar)
     end
     -- The options preview copies a real plate's size (see MeasurePlate).
-    MeasurePlate(plate, row, PlateAnchor(plate))
+    MeasurePlate(plate, row, bar)
     row.unit = unit
     row:Show()
     activePlates[unit] = row
+    if ns.SizeIconEdge then
+        for i = 1, row.count or 0 do ns.SizeIconEdge(row.icons[i]) end
+    end
     UpdatePlateIcons(row, unit)
     UpdatePlateMelee(row, unit)
     UpdatePlateDistance(row, unit)
     UpdateRowCooldowns(row)
+    -- Once more a frame later, when the plate has settled: EllesmereUI may not have put its own
+    -- plate on yet, and the plate's scale (which the icons' edges are sized for) may change.
+    if not settled and C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            if activePlates[unit] == row then OnPlateAdded(unit, true) end
+        end)
+    end
 end
 
 local function OnPlateRemoved(unit)
@@ -1545,7 +1862,10 @@ local function OptionCheck(parent, label, key, x, y, after)
 end
 
 local sliderCount = 0
-local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
+-- `custom` (optional) has get() and set(v) for a value not kept as db[key].
+local function OptionSlider(parent, label, key, minV, maxV, x, y, width, custom)
+    local function Get() if custom then return custom.get() end return db[key] end
+    local function Set(v) if custom then custom.set(v) else db[key] = v end end
     sliderCount = sliderCount + 1
     local name = "RangeLensOptionsSlider" .. sliderCount
     local holder = CreateFrame("Frame", nil, parent)
@@ -1573,16 +1893,20 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
     slider:SetPoint("TOPLEFT", 2, -18)
     slider:SetSize(width - 6, 18)
     slider:SetMinMaxValues(minV, maxV)
-    if slider.SetValueStep then slider:SetValueStep(1) end
+    local step = custom and custom.step or 1
+    if slider.SetValueStep then slider:SetValueStep(step) end
     if slider.SetObeyStepOnDrag then pcall(slider.SetObeyStepOnDrag, slider, true) end
+    local function Applied()
+        if not custom then FullRefresh() end
+        if previewHook then previewHook() end
+    end
 
     slider:SetScript("OnValueChanged", function(self, v)
-        v = math.floor(v + 0.5)
+        v = math.floor(v / step + 0.5) * step
         value:SetText(v)
         if self.syncing then return end
-        db[key] = v
-        FullRefresh()
-        if previewHook then previewHook() end
+        Set(v)
+        Applied()
     end)
     local committing = false
     local function Commit(self)
@@ -1590,15 +1914,14 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
         committing = true
         local v = tonumber(self:GetText())
         if v then
-            v = math.max(minV, math.min(maxV, math.floor(v + 0.5)))
-            db[key] = v
+            v = math.max(minV, math.min(maxV, math.floor(v / step + 0.5) * step))
+            Set(v)
             slider.syncing = true
             slider:SetValue(v)
             slider.syncing = false
-            FullRefresh()
-            if previewHook then previewHook() end
+            Applied()
         end
-        self:SetText(db[key])
+        self:SetText(Get())
         self:ClearFocus()
         committing = false
     end
@@ -1606,17 +1929,18 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width)
     value:SetScript("OnEditFocusLost", Commit)
     value:SetScript("OnEscapePressed", function(self)
         committing = true
-        self:SetText(db[key])
+        self:SetText(Get())
         self:ClearFocus()
         committing = false
     end)
 
     optionRefreshers[#optionRefreshers + 1] = function()
         slider.syncing = true
-        slider:SetValue(db[key])
+        slider:SetValue(Get())
         slider.syncing = false
-        if not value:HasFocus() then value:SetText(db[key]) end
+        if not value:HasFocus() then value:SetText(Get()) end
     end
+    return { holder = holder, slider = slider, value = value, caption = caption }
 end
 
 local ROW_H = 26
@@ -1656,21 +1980,25 @@ local function BuildContent()
     local left = CreateFrame("Frame", nil, leftScroll)
     left:SetSize(LEFT_W - 24, 1)
     leftScroll:SetScrollChild(left)
+    -- Controls go into col: the column itself, or a block of it that can hide.
+    local col = left
 
     local y = -2
     local function Heading(text)
-        local h = left:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h:SetPoint("TOPLEFT", 14, y - 4)
         h:SetText(text)
         y = y - 26
     end
     local function Check(label, key, after)
-        OptionCheck(left, label, key, 16, y, after)
+        local cb = OptionCheck(col, label, key, 16, y, after)
         y = y - 26
+        return cb
     end
     local function Slider(label, key, minV, maxV)
-        OptionSlider(left, label, key, minV, maxV, 20, y - 4, LEFT_W - 70)
+        local handle = OptionSlider(col, label, key, minV, maxV, 20, y - 4, LEFT_W - 70)
         y = y - 50
+        return handle
     end
 
     -- Where each part shows: a grid of parts by place.
@@ -1678,31 +2006,31 @@ local function BuildContent()
     local GRID_COLS = { { "all", "All" }, { "target", "Target" }, { "focus", "Focus" }, { "panel", "Panel" } }
     local GRID_ROWS = { { "icons", "Spell icons" }, { "distance", "Range" }, { "aggro", "Aggro eye" } }
     local gridX, gridW = 112, 42
-    for i, col in ipairs(GRID_COLS) do
-        local h = left:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        h:SetPoint("BOTTOM", left, "TOPLEFT", gridX + (i - 1) * gridW + 12, y - 12)
-        h:SetText(col[2])
+    for i, place in ipairs(GRID_COLS) do
+        local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        h:SetPoint("BOTTOM", col, "TOPLEFT", gridX + (i - 1) * gridW + 12, y - 12)
+        h:SetText(place[2])
     end
     y = y - 16
     for _, r in ipairs(GRID_ROWS) do
-        local label = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local label = col:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         label:SetPoint("TOPLEFT", 16, y - 5)
         label:SetText(r[2])
-        for i, col in ipairs(GRID_COLS) do
-            local cb = CreateCheck(left)
+        for i, place in ipairs(GRID_COLS) do
+            local cb = CreateCheck(col)
             cb:SetPoint("TOPLEFT", gridX + (i - 1) * gridW, y)
             cb:SetScript("OnClick", function(self)
-                db.show[r[1]][col[1]] = self:GetChecked() and true or false
+                db.show[r[1]][place[1]] = self:GetChecked() and true or false
                 FullRefresh()
                 if previewHook then previewHook() end
             end)
             optionRefreshers[#optionRefreshers + 1] = function()
-                cb:SetChecked(db.show[r[1]][col[1]] and true or false)
+                cb:SetChecked(db.show[r[1]][place[1]] and true or false)
             end
         end
         y = y - 26
     end
-    local gridNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local gridNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     gridNote:SetPoint("TOPLEFT", 20, y - 2)
     gridNote:SetWidth(LEFT_W - 60)
     gridNote:SetJustifyH("LEFT")
@@ -1720,12 +2048,12 @@ local function BuildContent()
 
     -- A button that steps through choices; right-click goes back.
     local function Cycle(label, key, values, labels)
-        local cap = left:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local cap = col:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         cap:SetPoint("TOPLEFT", 20, y - 4)
         cap:SetText(label)
-        local b = TryCreate("Button", nil, left, { "UIPanelButtonTemplate" })
+        local b = TryCreate("Button", nil, col, { "UIPanelButtonTemplate" })
         b:SetSize(118, 22)
-        b:SetPoint("TOPLEFT", left, "TOPLEFT", LEFT_W - 150, y)
+        b:SetPoint("TOPLEFT", col, "TOPLEFT", LEFT_W - 150, y)
         b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         b:SetScript("OnClick", function(_, button)
             local idx = 1
@@ -1734,14 +2062,15 @@ local function BuildContent()
             db[key] = values[idx]
             b:SetText(labels[db[key]])
             FullRefresh()
-            if previewHook then previewHook() end
+            RefreshOptions() -- other controls may follow this choice
         end)
         optionRefreshers[#optionRefreshers + 1] = function() b:SetText(labels[db[key]] or labels[values[1]]) end
         y = y - 30
+        return { cap = cap, button = b }
     end
 
     Heading("Aggro eye")
-    local aggroNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local aggroNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     aggroNote:SetPoint("TOPLEFT", 20, y)
     aggroNote:SetWidth(LEFT_W - 60)
     aggroNote:SetJustifyH("LEFT")
@@ -1753,32 +2082,141 @@ local function BuildContent()
     Slider("Eye left / right", "eyeOffsetX", -60, 60)
     Slider("Eye up / down", "eyeOffsetY", -40, 40)
 
+    -- The range: shown as numbers or as a light. Where it sits and how big it is apply to
+    -- both, so they stay; the light's own settings and the numbers' own settings each sit in a
+    -- block that is hidden for the other way, and everything below closes up (Reflow).
     Heading("Range")
     Cycle("Show as", "distanceStyle", { "numbers", "light" }, { numbers = "Numbers", light = "Light" })
-    local lightNote = left:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local rangePosition = Cycle("Position", "distancePosition", DIST_POSITIONS, DIST_POSITION_LABEL)
+    local rangeSize = Slider("Text size", "distanceSize", 8, 28)
+    local blocksTop = y
+    -- A new block: what follows is built into it, from its own top.
+    local function Block()
+        local f = CreateFrame("Frame", nil, left)
+        f:SetSize(LEFT_W - 24, 1)
+        col, y = f, 0
+        return f
+    end
+    local lightBlock = Block()
+    local lightNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     lightNote:SetPoint("TOPLEFT", 20, y)
     lightNote:SetWidth(LEFT_W - 60)
     lightNote:SetJustifyH("LEFT")
-    lightNote:SetText("Light: green while the mob is within the first distance, yellow within the second, red beyond. Its size is the Text size below.")
-    y = y - 40
-    Slider("Green up to (yards)", "lightGreen", 1, 45)
-    Slider("Yellow up to (yards)", "lightYellow", 1, 45)
-    Check("Light glow", "lightGlow", FullRefresh)
+    lightNote:SetText("Light: green while the mob is within the first distance, yellow within the second, red beyond.")
+    y = y - 30
+    local lightOnly = {
+        Slider("Green up to (yards)", "lightGreen", 1, 45),
+        Slider("Yellow up to (yards)", "lightYellow", 1, 45),
+        Check("Light glow", "lightGlow", FullRefresh),
+    }
+    local lightH = -y
 
-    Heading("Distance text")
-    Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL)
-    Cycle("Position", "distancePosition", DIST_POSITIONS, DIST_POSITION_LABEL)
-    Cycle("Colour", "distanceColor", DIST_COLORS, DIST_COLOR_LABEL)
-    Check("Show \"yd\"", "distanceYd", FullRefresh)
-    Slider("Text size", "distanceSize", 8, 28)
-    Slider("Text shadow", "distanceShadow", 0, 4)
+    local numbersBlock = Block()
+    Heading("Range numbers")
+    local numbersNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    numbersNote:SetPoint("TOPLEFT", 20, y)
+    numbersNote:SetWidth(LEFT_W - 60)
+    numbersNote:SetJustifyH("LEFT")
+    numbersNote:SetText("For Show as Numbers.")
+    y = y - 18
+    local numbersOnly = {
+        Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL),
+        Cycle("Color", "distanceColor", DIST_COLORS, DIST_COLOR_LABEL),
+        Check("Show \"yd\"", "distanceYd", FullRefresh),
+        Slider("Text shadow", "distanceShadow", 0, 4),
+    }
+    local numbersH = -y
+
+    -- Everything after the two blocks, which moves up when one of them hides.
+    local rest = Block()
 
     Heading("Size and position")
     Slider("Panel icon size", "panelIconSize", 16, 80)
     Slider("Nameplate icon size", "plateIconSize", 8, 40)
     Slider("Nameplate up / down", "plateOffsetY", -100, 100)
     Slider("Nameplate left / right", "plateOffsetX", -200, 200)
-    left:SetHeight(-y + 8)
+
+    -- Window style (Styles.lua). This page itself keeps the game's look in every style.
+    Heading("Look")
+    local Styles = ns.Styles
+    local styleBtn = TryCreate("Button", nil, col, { "UIPanelButtonTemplate" })
+    styleBtn:SetSize(200, 22)
+    styleBtn:SetPoint("TOPLEFT", col, "TOPLEFT", 20, y)
+    styleBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    local styleNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    styleNote:SetPoint("TOPLEFT", 22, y - 28)
+    styleNote:SetWidth(LEFT_W - 60)
+    styleNote:SetJustifyH("LEFT")
+    y = y - 58
+    local opacity = OptionSlider(col, "Dark background opacity", "darkAlpha", 0, 100, 20, y - 4, LEFT_W - 70, {
+        step = 5,
+        get = function() return math.floor((db.darkAlpha or 0.92) * 100 + 0.5) end,
+        set = function(v)
+            db.darkAlpha = v / 100
+            if Styles then Styles.SetDarkAlpha(db.darkAlpha) end
+        end,
+    })
+    y = y - 50
+    local function ShowStyle()
+        styleBtn:SetText("Window style: " .. (Styles and Styles.Name(db.style) or "Blizzard"))
+        styleNote:SetText(Styles and Styles.Note() or "")
+        local dark = db.style == "dark"
+        opacity.slider:SetEnabled(dark)
+        if opacity.value.SetEnabled then opacity.value:SetEnabled(dark) end
+        opacity.holder:SetAlpha(dark and 1 or 0.5)
+        opacity.caption:SetFontObject(dark and GameFontHighlight or GameFontDisable)
+    end
+    optionRefreshers[#optionRefreshers + 1] = ShowStyle
+    styleBtn:SetScript("OnClick", function(_, button)
+        if Styles then Styles.Cycle(button == "RightButton" and -1 or 1) end
+        ShowStyle()
+    end)
+    styleBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Window style", 1, 1, 1)
+        for _, line in ipairs(Styles and Styles.HELP or {}) do GameTooltip:AddLine(line, nil, nil, nil, true) end
+        GameTooltip:AddLine("Also sets the look of the range icons: the Cooldown Manager's in Blizzard, square in Dark and EllesmereUI. This page keeps the game's look.", nil, nil, nil, true)
+        GameTooltip:AddLine("Left-click for the next style, right-click for the previous one.", 0.6, 0.6, 0.6, true)
+        GameTooltip:Show()
+    end)
+    styleBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    opacity.slider:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Dark background opacity", 1, 1, 1)
+        GameTooltip:AddLine("How much of the world shows through the Dark style's windows.", nil, nil, nil, true)
+        if db.style ~= "dark" then GameTooltip:AddLine("Applies to the Dark style only.", 1, 0.82, 0, true) end
+        GameTooltip:Show()
+    end)
+    opacity.slider:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    local restH = -y
+    col = left
+
+    -- Shows the block for the way the range is shown, hides the other, and stacks what follows
+    -- under the one shown, so there is no gap and the scroll height fits.
+    local function Reflow()
+        local light = db.distanceStyle == "light"
+        lightBlock:SetShown(light)
+        numbersBlock:SetShown(not light)
+        local top = blocksTop
+        lightBlock:ClearAllPoints()
+        lightBlock:SetPoint("TOPLEFT", left, "TOPLEFT", 0, top)
+        lightBlock:SetHeight(lightH)
+        if light then top = top - lightH end
+        numbersBlock:ClearAllPoints()
+        numbersBlock:SetPoint("TOPLEFT", left, "TOPLEFT", 0, top)
+        numbersBlock:SetHeight(numbersH)
+        if not light then top = top - numbersH end
+        rest:ClearAllPoints()
+        rest:SetPoint("TOPLEFT", left, "TOPLEFT", 0, top)
+        rest:SetHeight(restH)
+        left:SetHeight(-(top - restH) + 8)
+        -- The size is the light's in Light, the text's in Numbers.
+        rangeSize.caption:SetText(light and "Light size" or "Text size")
+    end
+    optionRefreshers[#optionRefreshers + 1] = Reflow
+    Reflow()
+    ns.rangeControls = { position = rangePosition, size = rangeSize, lightOnly = lightOnly, numbersOnly = numbersOnly,
+        lightBlock = lightBlock, numbersBlock = numbersBlock, rest = rest, top = blocksTop }
 
     -- Spell list
     local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -1841,6 +2279,7 @@ local function BuildContent()
     mockName:SetPoint("BOTTOM", mockBar, "TOP", 0, 2)
     mockName:SetText("Elder Mottled Boar")
     local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
+    c.mock = { plate = plate, bar = mockBar, frame = mockFrame, preview = preview } -- for ns.DrawEuiPreview
 
     local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
     prow.aggro = MakeAggroEye(prow)
@@ -1929,37 +2368,60 @@ local function BuildContent()
         -- Draw at the options window's own scale, the way the game's nameplate
         -- preview is, whatever scale this page itself is shown at.
         local rowScale = look.rowScale or 1
-        local ref = (SettingsPanel and SettingsPanel:IsShown() and SettingsPanel) or UIParent
-        local okRef, refScale = pcall(ref.GetEffectiveScale, ref)
-        if not okRef or type(refScale) ~= "number" or refScale <= 0 then refScale = pe end
-        plate:SetScale(rowScale * refScale / pe)
-        mockBar:SetSize(look.w / rowScale, look.h / rowScale)
+        local isClassic
+        -- Which plate to draw: EllesmereUI's (drawn from its own settings), the game's Classic
+        -- style, or the game's others.
         local size, style = PlateSettings()
         local h, v = PlateScale(size, style)
-        mockLevel:SetSize(28 * h, 16 * h)
-        -- Font sizes follow the Size setting, as Blizzard_NamePlates sets them:
-        -- the name at 14 (10 for Classic) and the level at 10, times the vertical scale.
-        local isClassic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
-        if mockName.SetTextHeight then mockName:SetTextHeight((isClassic and 10 or 14) * v) end
-        if mockLevelText.SetTextHeight then mockLevelText:SetTextHeight(10 * v) end
-        -- The Classic style draws the old bar and border; the others the Cooldown Manager bar.
-        local classic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
-        if classic ~= c.classicLook then
-            c.classicLook = classic
-            if classic then
-                mockBar:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill")
-                mockFrame:SetTexture("Interface\\Tooltips\\Nameplate-Border")
-                mockFrame:SetTexCoord(0, 1, 0.5, 1)
+        isClassic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+        local kind = look.eui and "eui" or (isClassic and "classic" or "modern")
+        if kind ~= c.lookKind then
+            c.lookKind = kind
+            local game = kind ~= "eui"
+            mockName:SetShown(game)
+            mockLevel:SetShown(game)
+            mockLevelText:SetShown(game)
+            if not game then
+                mockBar:SetTexture("Interface\\Buttons\\WHITE8X8")
             else
-                if HasAtlas("UI-HUD-CoolDownManager-Bar") then mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar") end
-                if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") end
+                if c.mock.texts then for _, fs in pairs(c.mock.texts) do fs:Hide() end end
+                if c.mock.glow then for _, t in ipairs(c.mock.glow) do t:Hide() end end
+                mockFrame:ClearAllPoints()
                 mockFrame:SetTexCoord(0, 1, 0, 1)
+                mockFrame:SetPoint("TOPLEFT", mockBar, "TOPLEFT", -2, 3)
+                mockFrame:SetPoint("BOTTOMRIGHT", mockBar, "BOTTOMRIGHT", 6, -6)
+                -- The Classic style draws the old bar and border; the others the Cooldown Manager bar.
+                if kind == "classic" then
+                    mockBar:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill")
+                    mockFrame:SetTexture("Interface\\Tooltips\\Nameplate-Border")
+                    mockFrame:SetTexCoord(0, 1, 0.5, 1)
+                else
+                    if HasAtlas("UI-HUD-CoolDownManager-Bar") then mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar") end
+                    if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") end
+                end
+                mockBar:SetVertexColor(0.9, 0.15, 0.1)
             end
-            mockBar:SetVertexColor(0.9, 0.15, 0.1)
         end
-        previewLabel:SetText("Nameplate preview: drag an icon to reorder.  "
-            .. (measured and "|cff80ff80Matches your nameplate settings.|r"
-                or "|cffffd060Estimated until a nameplate is on screen.|r"))
+        local note
+        if kind == "eui" then
+            note = ns.DrawEuiPreview(c.mock, look, measured, pe)
+        else
+            -- Draw at the options window's own scale, the way the game's nameplate
+            -- preview is, whatever scale this page itself is shown at.
+            local ref = (SettingsPanel and SettingsPanel:IsShown() and SettingsPanel) or UIParent
+            local okRef, refScale = pcall(ref.GetEffectiveScale, ref)
+            if not okRef or type(refScale) ~= "number" or refScale <= 0 then refScale = pe end
+            plate:SetScale(rowScale * refScale / pe)
+            mockBar:SetSize(look.w / rowScale, look.h / rowScale)
+            mockLevel:SetSize(28 * h, 16 * h)
+            -- Font sizes follow the Size setting, as Blizzard_NamePlates sets them:
+            -- the name at 14 (10 for Classic) and the level at 10, times the vertical scale.
+            if mockName.SetTextHeight then mockName:SetTextHeight((isClassic and 10 or 14) * v) end
+            if mockLevelText.SetTextHeight then mockLevelText:SetTextHeight(10 * v) end
+            note = measured and "|cff80ff80Matches your nameplate settings.|r"
+                or "|cffffd060Estimated until a nameplate is on screen.|r"
+        end
+        previewLabel:SetText("Nameplate preview: drag an icon to reorder.  " .. note)
         LayoutRow(prow, db.plateIconSize, 2, false)
         prow:ClearAllPoints()
         prow:SetPoint("TOP", mockBorder, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
@@ -2005,6 +2467,7 @@ local function BuildContent()
         end
     end
     previewHook = function() if c:IsVisible() then c:UpdatePreview() end end
+    ns.RefreshPreview = previewHook
 
     local area = CreateFrame("Frame", nil, c)
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
@@ -2274,6 +2737,10 @@ local function Host(parent, x, y, scale, width, height)
     content:SetPoint("TOPLEFT", parent, "TOPLEFT", x / scale, y / scale)
     content:Show()
     RefreshOptions()
+    -- Again a frame later: the preview's scale is only final once the page has been laid out.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function() if previewHook then previewHook() end end)
+    end
 end
 
 local function BuildWindow()
@@ -2309,13 +2776,18 @@ local function BuildWindow()
     local portrait = "Interface\\Icons\\Ability_Hunter_SniperShot"
     if f.SetPortraitToAsset then pcall(f.SetPortraitToAsset, f, portrait)
     elseif f.PortraitContainer and f.PortraitContainer.portrait then f.PortraitContainer.portrait:SetTexture(portrait) end
-    if not (f.CloseButton or _G["RangeLensOptionsCloseButton"]) then
-        local close = TryCreate("Button", nil, f, { "UIPanelCloseButton" })
+    local close = f.CloseButton or _G["RangeLensOptionsCloseButton"]
+    if not close then
+        close = TryCreate("Button", nil, f, { "UIPanelCloseButton" })
         close:SetPoint("TOPRIGHT", 2, 2)
-        close:SetScript("OnClick", function() f:Hide() end)
+        f.rlClose = close
     end
+    -- The template's X closes through HideUIPanel, which the game refuses to
+    -- addon code in combat; hiding the window directly always works.
+    if close and close.SetScript then close:SetScript("OnClick", function() f:Hide() end) end
 
     f:SetScript("OnShow", function(self) Host(self, 0, top, 1) end)
+    if ns.SkinWindow then ns.SkinWindow(f) end
     return f
 end
 
@@ -2388,22 +2860,32 @@ end)
 local function RegisterOptionsPage()
     if not (Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory) then return end
     local page = CreateFrame("Frame")
+    -- Hidden until the game's panel shows it. A frame made without a parent is shown (and counts
+    -- as visible), so when the panel parented it into an already open window and called Show,
+    -- nothing changed and OnShow never ran: the first visit from Esc > Options > AddOns found
+    -- only the title. Shard Grid's page is hidden the same way.
+    page:Hide()
     local title = page:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("Range Lens")
-    page:SetScript("OnShow", function(self)
+    local function Fill(self, why)
         if not EnsureContent() then return end
         if window and window:IsShown() then window:Hide() end
         local w, h = self:GetWidth() or 0, self:GetHeight() or 0
+        if not ns.report.page then
+            -- What the first visit found, for /rangelens debug.
+            ns.report.page = ("first shown by %s at %dx%d"):format(why, math.floor(w + 0.5), math.floor(h + 0.5))
+        end
         local scale = 1
         if w > 0 and h > 0 then scale = math.min(1, (w - 12) / W, (h - 50) / CONTENT_H) end
         -- Fill the page: the spell list takes all the width and height left.
         Host(self, 6, -42, scale, (w - 12) / scale, (h - 50) / scale)
-    end)
+    end
+    page:SetScript("OnShow", function(self) Fill(self, "OnShow") end)
+    -- The page's size arrives when the panel lays it out, which can be after OnShow. Fit again
+    -- then, and host the controls here if they are not here yet (should OnShow ever be missed).
     page:SetScript("OnSizeChanged", function(self)
-        if self:IsVisible() and content and content:GetParent() == self then
-            self:GetScript("OnShow")(self)
-        end
+        if self:IsVisible() then Fill(self, "OnSizeChanged") end
     end)
     local category = Settings.RegisterCanvasLayoutCategory(page, "Range Lens")
     if category then
@@ -2420,6 +2902,9 @@ local function PlaceMinimapButton()
     if not mmButton then return end
     local angle = math.rad(db.minimapAngle or 200)
     local radius = (Minimap:GetWidth() or 140) / 2 + 6
+    -- Only while it sits on the minimap. A button collector (EllesmereUI's, for one) that
+    -- has taken the button keeps it where it put it.
+    if mmButton:GetParent() ~= Minimap then return end
     mmButton:ClearAllPoints()
     mmButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radius, math.sin(angle) * radius)
 end
@@ -2500,28 +2985,29 @@ local function ParseSpellArg(arg)
 end
 
 local HELP = {
-    "/rl - open the options (Options > AddOns > Range Lens)",
-    "/rl minimap - show or hide the minimap button",
-    "/rl aggro - toggle the \"!\" inside a red mob's estimated aggro range",
-    "/rl debug - print the range answers for your target and each nameplate",
-    "/rl add <spell name or ID> - track a spell",
-    "/rl remove <spell or list number> - stop tracking",
-    "/rl list - show tracked spells",
-    "/rl clear | /rl defaults - empty the list or load class defaults",
-    "/rl plates | /rl panel - toggle nameplate icons or target panel",
-    "/rl enemy - toggle enemies-only on nameplates",
-    "/rl targetonly | /rl focusonly - limit nameplate icons to your target, your focus, or both",
-    "/rl melee - toggle hiding nameplate icons in melee range",
-    "/rl cooldowns - toggle cooldown swipes",
-    "/rl inrange - show only the spells that can reach (no red icons)",
-    "/rl reach <spell> <yards> - set a spell's reach by hand; /rl reach <spell> sets it back to automatic",
-    "/rl range - toggle the spell range number on icons",
-    "/rl distance | /rl platedistance - toggle the distance on the panel or on nameplates (format it in the options)",
-    "/rl lock | /rl unlock - lock or move the target panel",
-    "/rl size <n> | /rl panelsize <n> - icon sizes",
-    "/rl offset <n> | /rl offsetx <n> - nameplate row up/down and left/right",
-    "/rl dim <0-1> - strength of the out-of-range look",
-    "/rl reset - restore all settings (keeps spell list)",
+    "/rangelens - open the options (Options > AddOns > Range Lens)",
+    "/rangelens minimap - show or hide the minimap button",
+    "/rangelens aggro - toggle the \"!\" inside a red mob's estimated aggro range",
+    "/rangelens debug - print the range answers for your target and each nameplate",
+    "/rangelens add <spell name or ID> - track a spell",
+    "/rangelens remove <spell or list number> - stop tracking",
+    "/rangelens list - show tracked spells",
+    "/rangelens clear | /rangelens defaults - empty the list or load class defaults",
+    "/rangelens plates | /rangelens panel - toggle nameplate icons or target panel",
+    "/rangelens enemy - toggle enemies-only on nameplates",
+    "/rangelens targetonly | /rangelens focusonly - limit nameplate icons to your target, your focus, or both",
+    "/rangelens melee - toggle hiding nameplate icons in melee range",
+    "/rangelens cooldowns - toggle cooldown swipes",
+    "/rangelens inrange - show only the spells that can reach (no red icons)",
+    "/rangelens reach <spell> <yards> - set a spell's reach by hand; /rangelens reach <spell> sets it back to automatic",
+    "/rangelens range - toggle the spell range number on icons",
+    "/rangelens distance | /rangelens platedistance - toggle the distance on the panel or on nameplates (format it in the options)",
+    "/rangelens lock | /rangelens unlock - lock or move the target panel",
+    "/rangelens size <n> | /rangelens panelsize <n> - icon sizes",
+    "/rangelens offset <n> | /rangelens offsetx <n> - nameplate row up/down and left/right",
+    "/rangelens dim <0-1> - strength of the out-of-range look",
+    "/rangelens style [auto|blizzard|dark] - window and icon style (no word: the next one)",
+    "/rangelens reset - restore all settings (keeps spell list)",
 }
 
 local function OnOff(v) return v and "|cff40ff40on|r" or "|cffff4040off|r" end
@@ -2535,7 +3021,7 @@ local function Slash(msg)
         return
     elseif cmd == "add" then
         local q = ParseSpellArg(rest)
-        if not q then return Print("usage: /rl add <spell name or ID>") end
+        if not q then return Print("usage: /rangelens add <spell name or ID>") end
         if FindEntry(q) and type(q) ~= "number" then return Print("already tracking " .. tostring(q)) end
         local name = SpellInfo(q)
         if not name then
@@ -2557,7 +3043,7 @@ local function Slash(msg)
         FullRefresh()
         Print("removed " .. tostring(removed))
     elseif cmd == "list" then
-        if #cdb.spells == 0 then return Print("no spells tracked. /rl add <spell> or /rl defaults") end
+        if #cdb.spells == 0 then return Print("no spells tracked. /rangelens add <spell> or /rangelens defaults") end
         for i, entry in ipairs(cdb.spells) do
             local name = SpellInfo(entry)
             Print(i .. ". " .. tostring(name or entry) .. (name and "" or " |cff888888(not known)|r"))
@@ -2590,7 +3076,7 @@ local function Slash(msg)
         spellName = strtrim(spellName or text)
         spellName = SpellInfo(spellName) or spellName -- the game's spelling and case
         if spellName == "" or not (SpellInfo(spellName) or AOE_RADIUS[spellName]) then
-            return Print("usage: /rl reach <spell> <yards>, or /rl reach <spell> for automatic")
+            return Print("usage: /rangelens reach <spell> <yards>, or /rangelens reach <spell> for automatic")
         end
         SetOverride(spellName, n and tonumber(n) or nil)
         FullRefresh()
@@ -2626,6 +3112,25 @@ local function Slash(msg)
         Print(("version %s, %d spells resolved, nameplate icons %s, enemies only %s"):format(
             tostring(C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")),
             #resolved, OnOff(db.show.icons.all), OnOff(db.enemyOnly)))
+        Print("skin: " .. tostring(ns.report.skin or "?") .. ", Dark opacity " .. tostring(db.darkAlpha))
+        Print(ns.ShortSlashNote() .. " EllesmereUI nameplates: " .. (ns.euiNameplates and "loaded" or "not loaded")
+            .. (ns.euiSeen and ", icons follow its health bar" or ""))
+        if ns.euiNameplates then
+            local look = RangeLensDB.plateLooks and RangeLensDB.plateLooks.eui
+            local spec = ns.EuiPreviewSpec(look)
+            local sl = spec.slots
+            Print(("  EllesmereUI preview: its settings %s, a real plate %s; bar %dx%d; texts top %s, left %s, right %s, center %s"):format(
+                spec.settings and "read" or "not found", look and "measured" or "not seen yet", spec.w, spec.h,
+                sl.Top.el, sl.Left.el, sl.Right.el, sl.Center.el))
+        end
+        local where = not content and "not built" or (settingsPage and content:GetParent() == settingsPage and "on the page")
+            or (window and content:GetParent() == window and "in the standalone window") or "not placed"
+        Print("options page: " .. tostring(ns.report.page or "not shown yet") .. "; controls " .. where
+            .. (content and (", " .. math.floor((content:GetWidth() or 0) + 0.5) .. "x" .. math.floor((content:GetHeight() or 0) + 0.5)
+                .. (content:IsVisible() and ", visible" or ", not visible")) or ""))
+        for k, v in pairs(ns.report) do
+            if type(k) == "string" and k:find("^skin error") then Print("  " .. k .. ": " .. tostring(v)) end
+        end
         local units = { "target" }
         for unit in pairs(plateUnits) do units[#units + 1] = unit end
         local shown = 0
@@ -2664,6 +3169,15 @@ local function Slash(msg)
         db.show.aggro.all, db.show.aggro.panel = on, on
         FullRefresh()
         Print("aggro light on every nameplate and the panel " .. OnOff(on))
+    elseif cmd == "style" then
+        local Styles = ns.Styles
+        if not Styles then return Print("window styles are not loaded") end
+        local arg = strtrim(rest or ""):lower()
+        if arg == "auto" or arg == "automatic" then Styles.Set("auto")
+        elseif arg == "blizzard" or arg == "dark" then Styles.Set(arg)
+        elseif arg == "" then Styles.Cycle(1)
+        else return Print("styles: auto, blizzard, dark") end
+        Print("window style: " .. Styles.Name(db.style) .. ". " .. Styles.Note())
     elseif cmd == "minimap" then
         db.minimap = not db.minimap
         UpdateMinimapButton()
@@ -2687,7 +3201,7 @@ local function Slash(msg)
         Print("panel " .. (db.locked and "locked" or "unlocked, drag to move"))
     elseif cmd == "size" or cmd == "panelsize" or cmd == "offset" or cmd == "offsetx" or cmd == "dim" then
         local n = tonumber(rest)
-        if not n then return Print("usage: /rl " .. cmd .. " <number>") end
+        if not n then return Print("usage: /rangelens " .. cmd .. " <number>") end
         if cmd == "size" then db.plateIconSize = math.max(8, math.min(48, n))
         elseif cmd == "panelsize" then db.panelIconSize = math.max(12, math.min(96, n))
         elseif cmd == "offset" then db.plateOffsetY = n
@@ -2703,17 +3217,42 @@ local function Slash(msg)
         PlacePanel()
         StartTicker()
         FullRefresh()
+        if ns.Styles then ns.Styles.Changed() end
         Print("settings reset")
     else
         Print("commands:")
+        print("  " .. ns.ShortSlashNote())
         for _, line in ipairs(HELP) do print("  " .. line) end
     end
     RefreshOptions()
 end
 
 SLASH_RANGELENS1 = "/rangelens"
-SLASH_RANGELENS2 = "/rl"
 SlashCmdList.RANGELENS = Slash
+-- /rangelens as well, but only when no other addon has it: it is a common reload command (EllesmereUI
+-- and Leatrix Plus both use it), and which addon gets a shared command is down to chance.
+-- Checked at login, once every addon has loaded; ns.rlOwner names the one that has it.
+-- One line for the help and the debug report.
+function ns.ShortSlashNote()
+    if ns.rlOwner then
+        return "/rl belongs to another addon here (" .. ns.rlOwner .. "), so Range Lens uses /rangelens only."
+    end
+    return "/rl works the same as /rangelens (no other addon uses it here)."
+end
+
+function ns.ClaimShortSlash()
+    ns.rlOwner = nil
+    for k, v in pairs(_G) do
+        if type(k) == "string" and type(v) == "string" and k:sub(1, 6) == "SLASH_"
+            and k:sub(1, 15) ~= "SLASH_RANGELENS" and v:lower() == "/rl" then
+            ns.rlOwner = k
+            SLASH_RANGELENS2 = nil
+            return false
+        end
+    end
+    SLASH_RANGELENS2 = "/rl"
+    return true
+end
 
 ---------------------------------------------------------------------------
 -- Events
@@ -2779,6 +3318,8 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
         -- 1.16.3: the eye glow on/off became Always / Only in range / Off.
         if db.eyeGlow == false and db.eyeGlowMode == nil then db.eyeGlowMode = "off" end
+        -- American spelling: the gray range number color used to be saved as "grey".
+        if db.distanceColor == "grey" then db.distanceColor = "gray" end
         -- 1.16.0: the aggro light became the eye, which wants more room.
         if not db.aggroEyeSized then
             if db.aggroSize == 12 then db.aggroSize = nil end
@@ -2810,6 +3351,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         end
     elseif event == "PLAYER_LOGIN" then
         ready = true
+        ns.euiNameplates = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EllesmereUINameplates") and true or false
         PlacePanel()
         FullRefresh()
         StartTicker()
@@ -2817,6 +3359,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
         LoadRangeItems()
         pcall(RegisterOptionsPage)
         UpdateMinimapButton()
+        ns.ClaimShortSlash()
     elseif not ready then
         -- Remember plates that appear before login so FullRefresh picks them up.
         if event == "NAME_PLATE_UNIT_ADDED" then plateUnits[arg1] = true

@@ -28,7 +28,7 @@ function areaOf(spellID, depth) {
     const a = e.ImplicitTarget_0, b = e.ImplicitTarget_1;
     const rIdx = +e.EffectRadiusIndex_1 || +e.EffectRadiusIndex_0;
     let kind = null;
-    if (a === '22' && ENEMY_AREA.has(b)) kind = 'around';          // centred on you
+    if (a === '22' && ENEMY_AREA.has(b)) kind = 'around';          // centered on you
     else if (a === '18' && ENEMY_AREA.has(b)) kind = 'around';      // at your feet
     else if (a === '24') kind = 'cone';                              // cone in front of you
     if (kind && rIdx && radius[rIdx]) {
@@ -49,7 +49,7 @@ for (const id of learned) {
   const name = names[id];
   if (!name) continue;
   const m = misc[id];
-  // Cast at something in range (Blizzard, Flamestrike): not centred on you.
+  // Cast at something in range (Blizzard, Flamestrike): not centered on you.
   if (m && ranges[m.RangeIndex] > 0) continue;
   const area = areaOf(id, 0);
   if (!area) continue;

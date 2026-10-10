@@ -2,6 +2,19 @@
 
 All notable changes to Range Lens are listed here. The newest release is at the top.
 
+## 1.17.0 - 2026-10-10
+
+- Window styles: a new Look section at the bottom of the options picks the Window style, Automatic, Blizzard or Dark (click to step forward, right-click to step back), with a Dark background opacity slider (0 to 100) for the Dark style. Automatic uses EllesmereUI's look when it is installed, otherwise Blizzard's. Changing style offers a reload. `/rangelens style` does the same from chat (`/rangelens style auto`, `blizzard` or `dark`).
+- The range icons follow the style: the Cooldown Manager's rounded icons in Blizzard, and square icons with a thin black edge and a square cooldown sweep in Dark and EllesmereUI, the way EllesmereUI's own Cooldown Manager draws them. Red, orange and the sweep colors mean the same as before. The options page keeps the game's own look in every style.
+- EllesmereUI nameplates: the icons, range text and aggro eye now sit on EllesmereUI's nameplates. Before, they were placed on the game's hidden nameplate underneath and showed up in the wrong place.
+- The nameplate preview in the options is drawn from your EllesmereUI nameplate settings when you use them: bar size, colors, border, the name, level and health texts where you placed them, and your target as the sample mob. The label says it matches once it has read those settings and seen a real nameplate.
+- New command: `/rangelens`. EllesmereUI and Leatrix Plus both use `/rl` to reload the interface, so `/rl debug` reloaded instead of printing. `/rl` still works for Range Lens when no other addon has it, and `/rangelens help` says which.
+- The Range options show only what applies to how you show range: the light's settings appear with Show as Light, and the Range numbers group (format, color, "yd", text shadow) with Show as Numbers. Everything below closes up, so there are no gaps.
+- Fixed: the options page could open empty, showing only its title, the first time you went to it through Esc > Options > AddOns. It now fills in on the first visit.
+- Fixed: in the Dark style the black edge around nameplate icons could come out many pixels thick when the icons were first drawn. It is now sized again every time the icons are laid out.
+- Fixed: the close button on the standalone options window now works in combat.
+- American spelling throughout ("color", "gray", "center"). If you had picked the gray distance color, it is kept.
+
 ## 1.16.3 - 2026-10-08
 
 - Eye glow is a choice now: Always (yellow near, red inside), Only in range (no glow while you approach, just the searching eye; the pulsing red glow only once you are inside the estimated aggro range), or Off. If you had turned the glow off, it stays off.
@@ -50,7 +63,7 @@ All notable changes to Range Lens are listed here. The newest release is at the 
 
 ## 1.13.0 - 2026-10-03
 
-- Colour the distance text by distance: a new By distance choice under Distance text > Colour. The text runs from green when the mob is close, through yellow around 20 yards, to red from 40 yards, judged by the far end of the range shown (8-12 is green, 30-35 orange). The nameplate preview shows it too.
+- Color the distance text by distance: a new By distance choice under Distance text > Color. The text runs from green when the mob is close, through yellow around 20 yards, to red from 40 yards, judged by the far end of the range shown (8-12 is green, 30-35 orange). The nameplate preview shows it too.
 
 ## 1.12.2 - 2026-10-03
 
@@ -65,7 +78,7 @@ All notable changes to Range Lens are listed here. The newest release is at the 
 - Format the distance text. A new Distance text section in the options sets:
   - Format: 8-12 (the range), 12 (the far end), <12, or ~10 (the middle)
   - Position: right of the icons, below them or above them
-  - Colour: white, gold, grey or light blue
+  - Color: white, gold, gray or light blue
   - Show "yd" after the number
   - Text size and text shadow, as sliders you can also type into
 - These apply to the distance on nameplates and on the target panel, and the nameplate preview shows every change as you make it. Click a choice to step forward; right-click to step back.
@@ -97,7 +110,7 @@ All notable changes to Range Lens are listed here. The newest release is at the 
 
 ## 1.10.4 - 2026-10-02
 
-- Fixed: the nameplate preview came out larger than the game's own nameplate preview, and sat off-centre. It now takes a real nameplate's size relative to the nameplate itself and draws it in the options at that size, the way the game's preview does, so the two match. It is centred in its box. Earlier measurements are cleared once so they are taken again.
+- Fixed: the nameplate preview came out larger than the game's own nameplate preview, and sat off-center. It now takes a real nameplate's size relative to the nameplate itself and draws it in the options at that size, the way the game's preview does, so the two match. It is centered in its box. Earlier measurements are cleared once so they are taken again.
 
 ## 1.10.3 - 2026-10-02
 
@@ -186,7 +199,7 @@ All notable changes to Range Lens are listed here. The newest release is at the 
 
 First release.
 
-- Spell icons under every enemy nameplate and on a movable target panel. Full colour means the spell can reach; dark red means it can't.
+- Spell icons under every enemy nameplate and on a movable target panel. Full color means the spell can reach; dark red means it can't.
 - Icons drawn with Blizzard's own Cooldown Manager art: rounded icon, soft shadow, out of range tint and cooldown sweep, with the countdown on the panel.
 - Options on the game's own Options > AddOns > Range Lens page, opened from the minimap button or `/rl`: pick spells from your spellbook, display toggles, and sliders for icon sizes and for moving the nameplate icons.
 - The spell's range in yards on each icon.

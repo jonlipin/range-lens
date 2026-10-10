@@ -1,45 +1,12 @@
-## 1.16.3 - 2026-10-08
+## 1.17.0 - 2026-10-10
 
-- Eye glow is a choice now: Always (yellow near, red inside), Only in range (no glow while you approach, just the searching eye; the pulsing red glow only once you are inside the estimated aggro range), or Off. If you had turned the glow off, it stays off.
-
-## 1.16.2 - 2026-10-08
-
-- Fixed: opening the options in combat gave a UI error, because the game does not let an addon open its options window during combat. The minimap button and `/rl` now say the options will open when combat ends, and open them then.
-- Fixed: that blocked attempt also switched Range Lens's distance checks off for the rest of the session, so the range text and the aggro eye stopped showing until a reload. A blocked action no longer turns any checks off.
-- Eye position: Eye left / right and Eye up / down sliders move the aggro eye from its place just left of the health bar, on nameplates, the target panel and the preview.
-
-## 1.16.1 - 2026-10-08
-
-- Glow on or off: Eye glow (under Aggro eye) turns the yellow or red glow behind the aggro eye on or off, and Light glow (under Range) the soft halo around the range light. Both are on unless you turn them off.
-
-## 1.16.0 - 2026-10-08
-
-- The aggro warning is the dungeon finder eye now, animated as the game animates it in its own queue button: searching, on a yellow glow, as you near a mob's estimated aggro range, and fixed on you, on a pulsing red glow, inside it. The size slider is now Aggro eye size (10 to 40, default 20).
-- Range as a light: under Range, Show as switches between Numbers and Light. The light is green while the mob is within the first distance you set, yellow within the second, red beyond (Green up to and Yellow up to, default 10 and 30 yards), so you can set it to your spells instead of reading numbers. It sits where the range text would and follows the same Position and Text size. In the Where to show grid the row is now called Range.
-
-## 1.15.0 - 2026-10-08
-
-- Where to show: one grid in the options replaces the scattered on/off checkboxes. For each part (spell icons, range text and the aggro light) tick where it shows: All (every enemy nameplate), Target, Focus, and Panel (the target panel). Each part is set on its own, so for example the range text can show on every nameplate while the spell icons only show on your target. Your settings carry over.
-- The aggro light is yellow when you near a mob's estimated aggro range and red inside it, and no longer green when you are clear (green read as safe to go). It is turned on in the grid, and a new Aggro light size slider sets its size.
-- The slash commands that switched these parts now switch the matching grid boxes: `/rl plates`, `/rl targetonly`, `/rl focusonly`, `/rl panel` (spell icons), `/rl platedistance`, `/rl distance` (range text) and `/rl aggro` (aggro light on every nameplate and the panel).
-
-## 1.14.4 - 2026-10-08
-
-- The aggro light is a crisper circle now, a solid round light with a thin dark rim and a little glow behind it, and it sits directly left of the mob's health bar. On the target panel it sits just left of the icons.
-
-## 1.14.3 - 2026-10-08
-
-- The aggro warning is a glowing circle now, using the game's own soft glow: green while you are clear of a red mob's estimated aggro range, yellow within the warning distance, and red and pulsing inside it.
-- ?? mobs are no longer all treated as 45 yards: a raid boss counts as 3 levels above you (about 23 yards at your level, as Classic's level 63 bosses), and any other ?? mob as 10 levels above (about 30 yards).
-
-## 1.14.2 - 2026-10-08
-
-- The aggro warning now warns before you reach a mob's aggro range, not once you are in it: a yellow "!" when you are within a set distance of its estimated edge, turning red once you are inside. Set the distance with the new Warn yards early slider (0 to 15, default 5). The option is now called Warn before aggro range, and `/rl debug` shows where the warning starts for each mob.
-
-## 1.14.1 - 2026-10-08
-
-- Fixed: the minimap button (and `/rl`) sometimes opened Range Lens's own standalone window instead of the game's options. The game's options window can take a moment to appear, and Range Lens checked too soon, decided it had failed, and used its own window for the rest of the session. It now always opens the game's options at the Range Lens page.
-
-## 1.14.0 - 2026-10-08
-
-- Aggro warning (off unless you switch it on, under Aggro warning in the options, or `/rl aggro`): a red "!" on a mob's icon row, and on the target panel, while you are inside its estimated aggro range. It is an estimate, because the game keeps the real range to itself: about 20 yards for a mob of your level, 1 yard less per level you are above it and 1 more per level below, kept within 5 to 45 yards (45 for ?? mobs). It only covers red mobs, only out of stealth, and not once the mob is fighting. It lights only when a distance check proves you are inside the estimate, so it can light a little late but never early. `/rl debug` shows each mob's estimate.
+- Window styles: a new Look section at the bottom of the options picks the Window style, Automatic, Blizzard or Dark (click to step forward, right-click to step back), with a Dark background opacity slider (0 to 100) for the Dark style. Automatic uses EllesmereUI's look when it is installed, otherwise Blizzard's. Changing style offers a reload. `/rangelens style` does the same from chat (`/rangelens style auto`, `blizzard` or `dark`).
+- The range icons follow the style: the Cooldown Manager's rounded icons in Blizzard, and square icons with a thin black edge and a square cooldown sweep in Dark and EllesmereUI, the way EllesmereUI's own Cooldown Manager draws them. Red, orange and the sweep colors mean the same as before. The options page keeps the game's own look in every style.
+- EllesmereUI nameplates: the icons, range text and aggro eye now sit on EllesmereUI's nameplates. Before, they were placed on the game's hidden nameplate underneath and showed up in the wrong place.
+- The nameplate preview in the options is drawn from your EllesmereUI nameplate settings when you use them: bar size, colors, border, the name, level and health texts where you placed them, and your target as the sample mob. The label says it matches once it has read those settings and seen a real nameplate.
+- New command: `/rangelens`. EllesmereUI and Leatrix Plus both use `/rl` to reload the interface, so `/rl debug` reloaded instead of printing. `/rl` still works for Range Lens when no other addon has it, and `/rangelens help` says which.
+- The Range options show only what applies to how you show range: the light's settings appear with Show as Light, and the Range numbers group (format, color, "yd", text shadow) with Show as Numbers. Everything below closes up, so there are no gaps.
+- Fixed: the options page could open empty, showing only its title, the first time you went to it through Esc > Options > AddOns. It now fills in on the first visit.
+- Fixed: in the Dark style the black edge around nameplate icons could come out many pixels thick when the icons were first drawn. It is now sized again every time the icons are laid out.
+- Fixed: the close button on the standalone options window now works in combat.
+- American spelling throughout ("color", "gray", "center"). If you had picked the gray distance color, it is kept.
