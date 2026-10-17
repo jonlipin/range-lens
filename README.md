@@ -6,20 +6,20 @@ Made for WoW Forever (Interface 16001).
 
 ## Features
 
-- **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted. The Where to show grid sets each part (spell icons, range text, aggro light) for every nameplate, your target, your focus and the target panel, and they can hide while a mob is in melee range.
+- **Range at a glance on every mob.** A row of spell icons under each enemy nameplate, so you can see what reaches the mob you are about to pull, not just the one you have targeted. The Where to show grid sets each part (spell icons, range text, aggro eye) for other nameplates, your target's, your focus's and the target panel, and they can hide while a mob is in melee range.
 - **Target panel.** A larger row of the same icons for your target, placed wherever you like.
 - **Drawn like the Cooldown Manager.** The icons use Blizzard's own Cooldown Manager art: the same rounded icon, soft shadow, red out of range tint and a dark cooldown sweep that turns red while out of range, with the countdown on the panel.
 - **Pick your spells.** The options list every spell in your spellbook that has a range. Tick the ones you want, and use < and > to put their icons in the order you like.
-- **See it before you play.** The options show a nameplate preview that redraws as you change settings; drag its icons to reorder them.
+- **See it before you play, and set it by mouse.** The options show previews of your target's nameplate, your focus's and a mob that is both, which redraw as you change settings. Drag anything on them to move it, drop it on another side to put it there, use the mouse wheel to resize, and drag icons to reorder them.
 - **Tune any spell.** Unlock a spell in the options to set its reach by hand with a slider or by typing the yards.
 - **Range numbers.** Each icon shows the spell's range in yards, both ends for a spell with a minimum range (8-25 for Charge).
 - **Too close in orange.** Inside a spell's minimum range the icon turns orange instead of red, so you know to back off rather than close in.
 - **Or only what reaches.** Switch on Only show spells in range and an icon appears only while its spell can reach, with no red or orange at all.
-- **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20, or formatted your way (12, <12, ~10, with or without "yd"), in the color (or colored by distance), size, shadow and position you choose. Or show it as a light: green, yellow or red by distances you set.
+- **Live distance.** A distance to your target above the panel, and to each mob beside its nameplate, shown as a bracket such as 10-20, or formatted your way (12, <12, ~10, with or without "yd"), in the color (or colored by distance), size, shadow, position and offset you choose. Or show it as a light: green, yellow or red by distances you set.
 - **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Frost Nova starts 1 yard short, for its freeze, Arctic Reach is counted, and any of them can be unlocked and tuned.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
-- **Aggro warning.** An optional dungeon finder eye on red mobs: searching as you near their estimated aggro range, fixed on you inside it (out of stealth; an estimate from levels, since the game keeps the real range to itself).
-- **Mark your target and focus.** An optional mark on your target's and your focus's nameplates: a flat arrow, chevron, dot or diamond, an arrowhead, or the raid marker skull, in the color (black too), size, side and place you choose, with an optional bob (its own speed and distance) and outline. The marks are smooth at any size, and the arrow, chevron and diamond share one 90 degree angle, so when your target is also your focus the focus mark sits neatly in a chevron below it.
+- **Aggro warning.** An optional dungeon finder eye on red mobs: searching as you near their estimated aggro range, fixed on you inside it, on the side of the health bar you choose (out of stealth; an estimate from levels, since the game keeps the real range to itself).
+- **Mark your target and focus.** An optional mark on your target's and your focus's nameplates: a flat arrow, chevron, dot or diamond, an arrowhead, or the raid marker skull, each in its own color (black too), size, side and place, with its own optional bob and outline. The marks are smooth at any size. When your target is also your focus the two sit together, the one you choose nearest the plate; the arrow, chevron and diamond share one 90 degree angle, so a mark sits neatly in a chevron below it.
 - **Your look.** The Look section in the options picks the window style: Automatic, Blizzard or Dark, with an opacity slider for Dark. The range icons follow it, rounded like the Cooldown Manager in Blizzard and square in Dark and EllesmereUI.
 - **Works with EllesmereUI.** The icons sit on EllesmereUI's nameplates, and the nameplate preview is drawn from its nameplate settings.
 - **Per character.** Each character keeps its own spells, panel position and settings.
@@ -33,7 +33,7 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 
 - **Open the options:** left-click the minimap button, type `/rangelens`, or go to Options > AddOns > Range Lens.
 - **Move the panel:** while it is unlocked it has a thin blue outline. Drag it, then lock it from the options or with a right-click on the minimap button.
-- **Place the nameplate icons:** use the up / down, left / right and size sliders in the options.
+- **Place things on the nameplates:** drag them in the options' preview (shift-drag an icon to move the icon row), or use the sliders.
 
 ### Commands
 
@@ -44,14 +44,14 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 | `/rangelens` | Open or close the options |
 | `/rangelens add <spell>` / `/rangelens remove <spell or number>` | Track a spell, or stop tracking it |
 | `/rangelens list`, `/rangelens clear`, `/rangelens defaults` | Show, empty, or reset the list to your class's starting spells |
-| `/rangelens plates`, `/rangelens panel`, `/rangelens enemy` | Toggle spell icons on every nameplate, on the target panel, enemies only |
+| `/rangelens plates`, `/rangelens panel`, `/rangelens enemy` | Toggle spell icons on nameplates, on the target panel, enemies only |
 | `/rangelens targetonly`, `/rangelens focusonly` | Toggle spell icons on your target's, your focus's nameplate |
 | `/rangelens mark`, `/rangelens focusmark` | Toggle the mark on your target's, your focus's nameplate |
 | `/rangelens melee` | Toggle hiding nameplate icons in melee range |
 | `/rangelens cooldowns`, `/rangelens range` | Toggle the cooldown sweep, the range number on icons |
 | `/rangelens inrange` | Toggle showing only the spells that can reach |
 | `/rangelens reach <spell> <yards>` | Set a spell's reach by hand; without a number, back to automatic |
-| `/rangelens distance`, `/rangelens platedistance` | Toggle the range text on the panel, on every nameplate |
+| `/rangelens distance`, `/rangelens platedistance` | Toggle the range text on the panel, on nameplates |
 | `/rangelens lock`, `/rangelens unlock` | Lock the panel, or unlock it to drag |
 | `/rangelens size <n>`, `/rangelens panelsize <n>` | Icon sizes |
 | `/rangelens offset <n>`, `/rangelens offsetx <n>` | Nameplate row up / down, left / right |

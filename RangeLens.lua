@@ -309,18 +309,19 @@ local function StyleDistance(fs, anchor)
     local color = db.distanceColor or "white"
     local size = db.distanceSize or 14
     local shadow = db.distanceShadow or 1
-    local key = pos .. ":" .. color .. ":" .. size .. ":" .. shadow
+    local x, y = db.distanceX or 0, db.distanceY or 0
+    local key = pos .. ":" .. color .. ":" .. size .. ":" .. shadow .. ":" .. x .. ":" .. y
     if fs.rlStyle == key and fs.rlAnchor == anchor then return end
     fs.rlStyle, fs.rlAnchor = key, anchor
     fs:ClearAllPoints()
     if pos == "below" then
-        fs:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
+        fs:SetPoint("TOP", anchor, "BOTTOM", x, -2 + y)
     elseif pos == "above" then
-        fs:SetPoint("BOTTOM", anchor, "TOP", 0, 2)
+        fs:SetPoint("BOTTOM", anchor, "TOP", x, 2 + y)
     elseif pos == "left" then
-        fs:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+        fs:SetPoint("RIGHT", anchor, "LEFT", -4 + x, y)
     else
-        fs:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
+        fs:SetPoint("LEFT", anchor, "RIGHT", 4 + x, y)
     end
     local rgb = DIST_COLOR_RGB[color] or DIST_COLOR_RGB.white -- "distance" is colored per update
     fs:SetTextColor(rgb[1], rgb[2], rgb[3])
@@ -406,6 +407,8 @@ local DEFAULTS = {
     distanceColor = "white",
     distanceSize = 14,
     distanceShadow = 1,         -- drop shadow depth in pixels, 0 = none
+    distanceX = 0,              -- the range text's (or light's) offsets from where Position puts it
+    distanceY = 0,
     aggroWarning = false,       -- "!" near (yellow) and inside (red) a red mob's estimated aggro radius
     aggroWarnYards = 5,         -- how many yards before the estimated edge the yellow warning starts
     aggroSize = 20,             -- the aggro eye's size
@@ -415,22 +418,27 @@ local DEFAULTS = {
     eyeGlowMode = "always",    -- the glow behind the aggro eye: "always", "inside" (only in aggro range) or "off"
     eyeOffsetX = 0,             -- the aggro eye's position, from just left of the health bar
     eyeOffsetY = 0,
+    eyeSide = "left",           -- the aggro eye's side of the health bar (on the panel, of the icons)
     lightGlow = true,           -- the soft halo around the range light
-    -- Marks over your target's and your focus's nameplates (see MarkSettings).
-    targetMark = false, targetMarkArt = "arrow", targetMarkColor = "yellow", targetMarkPos = "above",
-    targetMarkSize = 20, targetMarkX = 0, targetMarkY = 0, targetMarkBob = true, targetMarkOutline = true,
-    targetMarkBobSpeed = 5, targetMarkBobDist = 4, -- bob speed 1 (slow) to 10, distance in pixels
-    focusMark = false, focusMarkArt = "diamond", focusMarkColor = "purple", focusMarkPos = "above",
-    focusMarkSize = 16, focusMarkX = 0, focusMarkY = 0, focusMarkBob = false, focusMarkOutline = true,
-    focusMarkBobSpeed = 5, focusMarkBobDist = 4,
+    -- Marks over your target's and your focus's nameplates (see MarkSettings), each set on its own.
+    targetMark = false, targetMarkArt = "arrow", targetMarkColor = "yellow", targetMarkSize = 20, targetMarkOutline = true,
+    targetMarkPos = "above", targetMarkX = 0, targetMarkY = 0, -- the side of the health bar, and offsets from there
+    targetMarkBob = true, targetMarkBobSpeed = 5, targetMarkBobDist = 4, -- bob speed 1 (slow) to 10, distance in pixels
+    focusMark = false, focusMarkArt = "diamond", focusMarkColor = "purple", focusMarkSize = 16, focusMarkOutline = true,
+    focusMarkPos = "above", focusMarkX = 0, focusMarkY = 0,
+    focusMarkBob = false, focusMarkBobSpeed = 5, focusMarkBobDist = 4,
+    markNearest = "target",     -- your target is your focus, marks on one side: the "target" or "focus" mark nearest the plate
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
     show = {
-        icons = { all = true, target = false, focus = false, panel = true },
-        distance = { all = true, target = false, focus = false, panel = true },
+        icons = { all = true, target = true, focus = true, panel = true },
+        distance = { all = true, target = true, focus = true, panel = true },
         aggro = { all = false, target = false, focus = false, panel = false },
     },
     minimap = true,         -- minimap button
+    previewTarget = true,   -- the options preview shows your target's nameplate,
+    previewFocus = false,   -- ... your focus's,
+    previewCombined = false, -- ... and the one of a mob that is both
     minimapAngle = 200,     -- degrees around the minimap
     plateIconSize = 18,
     panelIconSize = 40,
@@ -839,25 +847,35 @@ local function IsPlateOf(unit, token)
     return Truthy(UnitIsUnit(unit, token), false)
 end
 
--- The options' grid: does this part (icons, distance, aggro) show on this
--- nameplate (all / target / focus), or on the target panel?
+-- The options' grid: does this part (icons, distance, aggro) show on this nameplate, or on the
+-- target panel? Your target's and your focus's nameplates go by their own columns (a mob that is
+-- both by either); every other nameplate by Others (db.show[part].all).
 local function ShowOnPlate(part, unit)
     local m = db.show and db.show[part]
     if not m then return false end
-    if m.all then return true end
-    return ((m.target and IsPlateOf(unit, "target")) or (m.focus and IsPlateOf(unit, "focus"))) and true or false
+    local isTarget, isFocus = IsPlateOf(unit, "target"), IsPlateOf(unit, "focus")
+    if isTarget or isFocus then
+        return ((isTarget and m.target) or (isFocus and m.focus)) and true or false
+    end
+    return m.all and true or false
 end
+ns.ShowOnPlate = ShowOnPlate -- for the tests
 
 local function ShowOnPanel(part)
     local m = db.show and db.show[part]
     return (m and m.panel) and true or false
 end
 
--- On any nameplate at all (for the preview).
-local function ShowOnAnyPlate(part)
+-- On the preview's nameplate, as the mob it stands for: your "target", your "focus", or the
+-- "combined" one that is both (by either column), as ShowOnPlate decides in game.
+local function ShowInPreview(part, view)
     local m = db.show and db.show[part]
-    return (m and (m.all or m.target or m.focus)) and true or false
+    if not m then return false end
+    if view == "target" then return m.target and true or false end
+    if view == "focus" then return m.focus and true or false end
+    return (m.target or m.focus) and true or false
 end
+ns.ShowInPreview = ShowInPreview -- for the tests
 
 -- In melee range: the 5 yard item check passes.
 local function InMelee(unit)
@@ -1402,13 +1420,22 @@ local function MakeAggroEye(parent)
     return m
 end
 
--- Put the eye left of what it belongs to (a health bar, the panel's icons),
--- moved by the eye position sliders. The eye is scaled, so offsets are divided
--- by its scale to stay in screen units.
+-- Put the eye on its side of what it belongs to (a health bar, the panel's icons), moved by
+-- the eye position sliders. The eye is scaled, so offsets are divided by its scale to stay in
+-- the units of what it belongs to.
 local function AnchorEye(m, anchor)
     local scale = (db.aggroSize or 20) / 45
+    local x, y, side = db.eyeOffsetX or 0, db.eyeOffsetY or 0, db.eyeSide or "left"
     m:ClearAllPoints()
-    m:SetPoint("RIGHT", anchor, "LEFT", (-5 + (db.eyeOffsetX or 0)) / scale, (db.eyeOffsetY or 0) / scale)
+    if side == "right" then
+        m:SetPoint("LEFT", anchor, "RIGHT", (5 + x) / scale, y / scale)
+    elseif side == "above" then
+        m:SetPoint("BOTTOM", anchor, "TOP", x / scale, (5 + y) / scale)
+    elseif side == "below" then
+        m:SetPoint("TOP", anchor, "BOTTOM", x / scale, (-5 + y) / scale)
+    else
+        m:SetPoint("RIGHT", anchor, "LEFT", (-5 + x) / scale, y / scale)
+    end
 end
 
 local function ShowAggroMark(m, state)
@@ -1448,20 +1475,25 @@ local function ShowAggroMark(m, state)
     end
 end
 
--- Place a light where the distance text would go, by the Position setting.
+-- Place a light where the distance text would go, by the Position setting and the range
+-- offsets (in the units of what it belongs to: the light is scaled, so they are divided by
+-- its scale, the one SetLight gives it).
 local function PlaceLight(m, anchor)
     local pos = db.distancePosition or "right"
-    if m.rlPos == pos and m.rlAnchor == anchor then return end
-    m.rlPos, m.rlAnchor = pos, anchor
+    local scale = (db.distanceSize or 14) / 12
+    local x, y = (db.distanceX or 0) / scale, (db.distanceY or 0) / scale
+    local key = pos .. ":" .. x .. ":" .. y
+    if m.rlPos == key and m.rlAnchor == anchor then return end
+    m.rlPos, m.rlAnchor = key, anchor
     m:ClearAllPoints()
     if pos == "below" then
-        m:SetPoint("TOP", anchor, "BOTTOM", 0, -2)
+        m:SetPoint("TOP", anchor, "BOTTOM", x, -2 + y)
     elseif pos == "above" then
-        m:SetPoint("BOTTOM", anchor, "TOP", 0, 2)
+        m:SetPoint("BOTTOM", anchor, "TOP", x, 2 + y)
     elseif pos == "left" then
-        m:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+        m:SetPoint("RIGHT", anchor, "LEFT", -4 + x, y)
     else
-        m:SetPoint("LEFT", anchor, "RIGHT", 4, 0)
+        m:SetPoint("LEFT", anchor, "RIGHT", 4 + x, y)
     end
 end
 
@@ -1623,14 +1655,14 @@ do
             on = db[p] and true or false,
             art = MARK_ART_LABEL[db[p .. "Art"]] and db[p .. "Art"] or "arrow",
             color = db[p .. "Color"] or "yellow",
-            pos = MARK_POSITION_LABEL[db[p .. "Pos"]] and db[p .. "Pos"] or "above",
             size = db[p .. "Size"] or 20,
+            outline = db[p .. "Outline"] ~= false,
+            pos = MARK_POSITION_LABEL[db[p .. "Pos"]] and db[p .. "Pos"] or "above",
             x = db[p .. "X"] or 0,
             y = db[p .. "Y"] or 0,
             bob = db[p .. "Bob"] and true or false,
             bobSpeed = db[p .. "BobSpeed"] or 5,
             bobDist = db[p .. "BobDist"] or 4,
-            outline = db[p .. "Outline"] ~= false,
         }
     end
 
@@ -1693,7 +1725,7 @@ do
 
     -- Draw a mark from its settings. `s` from MarkSettings.
     local function DrawMarker(m, s)
-        local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline), s.bobSpeed, s.bobDist }, ":")
+        local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline) }, ":")
         if m.drawn == key then return end
         m.drawn = key
         local size = s.size
@@ -1729,18 +1761,6 @@ do
             end
         end
         fill:Show()
-        if m.bobMove then
-            -- Speed 5 takes half a second each way; 1 takes 2.5 seconds, 10 a quarter.
-            local dx, dy = Turn(s.pos, 0, -s.bobDist)
-            local each = 2.5 / math.max(1, s.bobSpeed)
-            local playing = m.bob:IsPlaying()
-            if playing then m.bob:Stop() end
-            m.bobMove:SetOffset(dx, dy)
-            m.bobBack:SetOffset(-dx, -dy)
-            m.bobMove:SetDuration(each)
-            m.bobBack:SetDuration(each)
-            if playing then m.bob:Play() end
-        end
     end
 
     -- How far out from the target mark's center a focus mark on it sits, in pixels: just beyond
@@ -1760,22 +1780,67 @@ do
         return rt.back * t.size + clear + rf.point * fo.size
     end
 
+    -- Shape a mark's bob: `dist` pixels in toward the plate on side `pos` and back out, at
+    -- `speed` 1 to 10 (5 takes half a second each way; 1 takes 2.5 seconds, 10 a quarter).
+    -- A bob that is playing starts over. True when the shape changed.
+    local function ShapeBob(m, pos, dist, speed)
+        if not m.bobMove then return false end
+        local key = pos .. ":" .. dist .. ":" .. speed
+        if m.bobShape == key then return false end
+        m.bobShape = key
+        local dx, dy = Turn(pos, 0, -dist)
+        local each = 2.5 / math.max(1, speed)
+        local playing = m.bob:IsPlaying()
+        if playing then m.bob:Stop() end
+        m.bobMove:SetOffset(dx, dy)
+        m.bobBack:SetOffset(-dx, -dy)
+        m.bobMove:SetDuration(each)
+        m.bobBack:SetDuration(each)
+        if playing then
+            m.bob:Play()
+            m.bobRun = (m.bobRun or 0) + 1
+        end
+        return true
+    end
+
+    -- Start or stop a mark's bob. bobRun counts the starts, so a mark bobbing in step with
+    -- another can tell when that one started over.
     local function Bob(m, on)
         if not m.bob then return end
+        if m.held then on = false end -- held still while dragged in the preview
         if on then
-            if not m.bob:IsPlaying() then m.bob:Play() end
+            if not m.bob:IsPlaying() then
+                m.bob:Play()
+                m.bobRun = (m.bobRun or 0) + 1
+            end
         elseif m.bob:IsPlaying() then
             m.bob:Stop()
+        end
+    end
+
+    -- Start a mark's bob in step with the base's: both from the beginning, at the same moment.
+    -- Both then run the same shape on the same clock, so they stay in step.
+    local function BobInStep(m, base)
+        base.bob:Stop()
+        m.bob:Stop()
+        base.bob:Play()
+        m.bob:Play()
+        base.bobRun = (base.bobRun or 0) + 1
+        m.follow, m.followRun = base, base.bobRun
+    end
+
+    -- On the plate it belongs to, so it hides, fades and scales with it.
+    local function Home(m)
+        if m:GetParent() ~= m.home then
+            m:SetParent(m.home)
+            m:SetFrameLevel(m.home:GetFrameLevel() + 40)
         end
     end
 
     -- Put a mark beside `anchor` (a health bar) on its own plate.
     local function PlaceMarker(m, anchor, s)
         DrawMarker(m, s)
-        if m:GetParent() ~= m.home then
-            m:SetParent(m.home)
-            m:SetFrameLevel(m.home:GetFrameLevel() + 40)
-        end
+        Home(m)
         local gap = MARK_GAP[s.pos]
         m:ClearAllPoints()
         if s.pos == "below" then
@@ -1788,21 +1853,40 @@ do
             m:SetPoint("BOTTOM", anchor, "TOP", s.x, gap + s.y)
         end
         m:Show()
+        m.follow = nil
+        ShapeBob(m, s.pos, s.bobDist, s.bobSpeed)
         Bob(m, s.bob)
     end
 
-    -- Put the focus mark on the target mark: a child of its moving part, so the pair moves
-    -- together with the target mark's bob, and placed by StackDistance (its own offsets and
-    -- bob are for when it is on a plate of its own).
-    local function RideMarker(m, target, t, s)
+    -- Put one mark just beyond the other (your target is your focus, both marks on one side):
+    -- StackDistance out from the base mark's center, so the pair moves as a group with the base
+    -- (this mark's own Left / right and Up / down are for a plate of its own). Each mark stays
+    -- on its own plate and runs its own bob, never part of the other (as a child of the base's
+    -- moving part, the game moved it by the bob over and over).
+    -- Bob: each by its own setting. Both bobbing alike (the same speed and distance), they bob
+    -- in step, as one. Otherwise this one, when it bobs, sits out by its bob distance, so the
+    -- near end of its bob still clears the base, which bobs in toward the plate, away from it.
+    local function RideMarker(m, base, b, s)
         DrawMarker(m, s)
-        if m:GetParent() ~= target.inner then m:SetParent(target.inner) end
-        m:SetFrameLevel(target.inner:GetFrameLevel() + 1)
-        local dx, dy = Turn(s.pos, 0, StackDistance(t, s))
+        Home(m)
+        m:SetFrameLevel(base:GetFrameLevel() + 5)
+        local inStep = b.bob and s.bob and b.bobSpeed == s.bobSpeed and b.bobDist == s.bobDist
+        local out = (s.bob and not inStep) and s.bobDist or 0
+        local dx, dy = Turn(s.pos, 0, StackDistance(b, s) + out)
         m:ClearAllPoints()
-        m:SetPoint("CENTER", target, "CENTER", dx, dy)
+        m:SetPoint("CENTER", base, "CENTER", dx, dy)
         m:Show()
-        Bob(m, false)
+        local changed = ShapeBob(m, s.pos, s.bobDist, s.bobSpeed)
+        if inStep and m.bob and base.bob and not (m.held or base.held) then
+            -- Started over whenever the two may have left step: a new shape, a new base, or the
+            -- base started over on its own (a new shape, or shown again).
+            if changed or m.follow ~= base or m.followRun ~= base.bobRun or not m.bob:IsPlaying() then
+                BobInStep(m, base)
+            end
+        else
+            m.follow = nil
+            Bob(m, s.bob)
+        end
     end
 
     local function HideMarker(m)
@@ -1813,15 +1897,19 @@ do
     -- Show both marks on a pair of mark frames for these plates (anchor per mark).
     local function ShowMarkerPair(marks, targetAnchor, focusAnchor)
         local t, fo = MarkSettings("target"), MarkSettings("focus")
-        if t.on and targetAnchor then PlaceMarker(marks.target, targetAnchor, t) else HideMarker(marks.target) end
-        if not (fo.on and focusAnchor) then
-            HideMarker(marks.focus)
-        elseif t.on and focusAnchor == targetAnchor and fo.pos == t.pos then
-            -- Your target is your focus, and both marks are on the same side.
-            RideMarker(marks.focus, marks.target, t, fo)
-        else
-            PlaceMarker(marks.focus, focusAnchor, fo)
+        local showTarget, showFocus = t.on and targetAnchor, fo.on and focusAnchor
+        if showTarget and showFocus and focusAnchor == targetAnchor and fo.pos == t.pos then
+            -- Your target is your focus, and both marks are on the same side: one sits just
+            -- beyond the other, the one the options put nearest the plate. The base is placed
+            -- first, so the other can take its bob in step.
+            local base, b, rider, r = marks.target, t, marks.focus, fo
+            if db.markNearest == "focus" then base, b, rider, r = marks.focus, fo, marks.target, t end
+            PlaceMarker(base, targetAnchor, b)
+            RideMarker(rider, base, b, r)
+            return
         end
+        if showTarget then PlaceMarker(marks.target, targetAnchor, t) else HideMarker(marks.target) end
+        if showFocus then PlaceMarker(marks.focus, focusAnchor, fo) else HideMarker(marks.focus) end
     end
 
     local plateMarks -- the in-game pair, made on first use
@@ -1862,6 +1950,7 @@ do
     Marks.POSITIONS, Marks.POSITION_LABEL = MARK_POSITIONS, MARK_POSITION_LABEL
     Marks.Make, Marks.ShowPair, Marks.Update, Marks.PlateRemoved = MakeMarker, ShowMarkerPair, UpdateMarkers, MarkersPlateRemoved
     Marks.StackDistance = StackDistance -- for the tests
+    Marks.Pair = function() return plateMarks end
     ns.Marks = Marks
 end
 
@@ -2154,11 +2243,20 @@ local function SetTracked(name, on)
     RefreshOptions()
 end
 
-local function CreateCheck(parent, label)
+-- The options' text, a size up from the game's usual (the page has the room), with the usual
+-- fonts where a client lacks these. On ns, for the main chunk's 200 locals limit.
+ns.font = {
+    text = _G.GameFontHighlightMedium and "GameFontHighlightMedium" or "GameFontHighlight", -- 14
+    head = _G.GameFontNormalLarge and "GameFontNormalLarge" or "GameFontNormal",             -- 16
+    note = "GameFontDisable",                                                                 -- 12
+    number = _G.GameFontNormalMed2 and "GameFontNormalMed2" or "GameFontNormal",
+}
+
+local function CreateCheck(parent, label, font)
     local cb = TryCreate("CheckButton", nil, parent, { "UICheckButtonTemplate", "ChatConfigCheckButtonTemplate" })
     cb:SetSize(24, 24)
     -- Own label: the templates disagree about where theirs lives.
-    cb.label = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    cb.label = cb:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
     cb.label:SetPoint("LEFT", cb, "RIGHT", 2, 0)
     cb.label:SetText(label or "")
     return cb
@@ -2167,7 +2265,7 @@ end
 local previewHook -- set by the options page: redraws the nameplate preview
 
 local function OptionCheck(parent, label, key, x, y, after)
-    local cb = CreateCheck(parent, label)
+    local cb = CreateCheck(parent, label, ns.font.text)
     cb:SetPoint("TOPLEFT", x, y)
     cb:SetScript("OnClick", function(self)
         db[key] = self:GetChecked() and true or false
@@ -2189,7 +2287,7 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width, custom)
     holder:SetPoint("TOPLEFT", x, y)
     holder:SetSize(width, 40)
 
-    local caption = holder:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    local caption = holder:CreateFontString(nil, "ARTWORK", ns.font.text)
     caption:SetPoint("TOPLEFT", 0, 0)
     caption:SetText(label)
     -- The value is a box you can type in (negative numbers too); Enter applies it.
@@ -2260,8 +2358,8 @@ local function OptionSlider(parent, label, key, minV, maxV, x, y, width, custom)
     return { holder = holder, slider = slider, value = value, caption = caption }
 end
 
-local ROW_H = 26
-local LEFT_W = 300   -- the settings column (one column, scrolls)
+local ROW_H = 28
+local LEFT_W = 400   -- the settings column (one column, scrolls); the spell list takes the rest
 local W = 920        -- the whole page in the standalone window; the options page uses its full width
 
 local CONTENT_H = 540
@@ -2278,7 +2376,7 @@ local function BuildContent()
     local c = CreateFrame("Frame")
     c:SetSize(W, CONTENT_H)
     c:Hide()
-    local PREVIEW_H = 200
+    local PREVIEW_H = 216
     local top = -4 - PREVIEW_H - 14 -- everything else sits below the nameplate preview
 
     -- Settings: one column with its own scroll bar, so the spell list gets the width.
@@ -2301,6 +2399,10 @@ local function BuildContent()
     local col = left
 
     local y = -2
+    local function NoteHeight(fs, minH)
+        local h = fs.GetStringHeight and fs:GetStringHeight()
+        return math.max(minH, (type(h) == "number" and h or 0) + 10)
+    end
     local headings = 0
     local function Heading(text, help)
         headings = headings + 1
@@ -2313,15 +2415,15 @@ local function BuildContent()
             rule:SetPoint("TOPLEFT", 14, y - 1)
             y = y - 6
         end
-        local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local h = col:CreateFontString(nil, "OVERLAY", ns.font.head)
         h:SetPoint("TOPLEFT", 14, y - 4)
         h:SetText(text)
         if help then
             -- The group's explanation, on hover, instead of a block of text.
             local q = CreateFrame("Button", nil, col)
-            q:SetSize(22, 16)
+            q:SetSize(26, 18)
             q:SetPoint("LEFT", h, "RIGHT", 2, 0)
-            local qt = q:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            local qt = q:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
             qt:SetPoint("CENTER")
             qt:SetText("(?)")
             q:SetScript("OnEnter", function(self)
@@ -2353,17 +2455,17 @@ local function BuildContent()
 
     -- Where each part shows: a grid of parts by place.
     Heading("Where to show")
-    local GRID_COLS = { { "all", "All" }, { "target", "Target" }, { "focus", "Focus" }, { "panel", "Panel" } }
+    local GRID_COLS = { { "all", "Others" }, { "target", "Target" }, { "focus", "Focus" }, { "panel", "Panel" } }
     local GRID_ROWS = { { "icons", "Spell icons" }, { "distance", "Range" }, { "aggro", "Aggro eye" } }
-    local gridX, gridW = 112, 42
+    local gridX, gridW = 150, 56
     for i, place in ipairs(GRID_COLS) do
-        local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h:SetPoint("BOTTOM", col, "TOPLEFT", gridX + (i - 1) * gridW + 12, y - 12)
         h:SetText(place[2])
     end
     y = y - 16
     for _, r in ipairs(GRID_ROWS) do
-        local label = col:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local label = col:CreateFontString(nil, "OVERLAY", ns.font.text)
         label:SetPoint("TOPLEFT", 16, y - 5)
         label:SetText(r[2])
         for i, place in ipairs(GRID_COLS) do
@@ -2380,12 +2482,12 @@ local function BuildContent()
         end
         y = y - 26
     end
-    local gridNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local gridNote = col:CreateFontString(nil, "OVERLAY", ns.font.note)
     gridNote:SetPoint("TOPLEFT", 20, y - 2)
     gridNote:SetWidth(LEFT_W - 60)
     gridNote:SetJustifyH("LEFT")
-    gridNote:SetText("All: every enemy nameplate. Target and Focus: only those mobs' nameplates. Panel: the target panel.")
-    y = y - 36
+    gridNote:SetText("Others: every enemy nameplate but your target's and your focus's. Target and Focus: those two nameplates (a mob that is both: either). Panel: the target panel.")
+    y = y - NoteHeight(gridNote, 44)
     Check("Enemies only", "enemyOnly", RefreshAllPlates)
     Check("Hide in melee range", "plateHideMelee", RefreshAllPlates)
 
@@ -2398,7 +2500,7 @@ local function BuildContent()
 
     -- A button that steps through choices; right-click goes back.
     local function Cycle(label, key, values, labels)
-        local cap = col:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local cap = col:CreateFontString(nil, "OVERLAY", ns.font.text)
         cap:SetPoint("TOPLEFT", 20, y - 4)
         cap:SetText(label)
         local b = TryCreate("Button", nil, col, { "UIPanelButtonTemplate" })
@@ -2426,6 +2528,8 @@ local function BuildContent()
     Cycle("Show as", "distanceStyle", { "numbers", "light" }, { numbers = "Numbers", light = "Light" })
     local rangePosition = Cycle("Position", "distancePosition", DIST_POSITIONS, DIST_POSITION_LABEL)
     local rangeSize = Slider("Text size", "distanceSize", 8, 28)
+    Slider("Range left / right", "distanceX", -60, 60)
+    Slider("Range up / down", "distanceY", -40, 40)
     local blocksTop = y
     -- A new block: what follows is built into it, from its own top.
     local function Block()
@@ -2435,12 +2539,12 @@ local function BuildContent()
         return f
     end
     local lightBlock = Block()
-    local lightNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local lightNote = col:CreateFontString(nil, "OVERLAY", ns.font.note)
     lightNote:SetPoint("TOPLEFT", 20, y)
     lightNote:SetWidth(LEFT_W - 60)
     lightNote:SetJustifyH("LEFT")
     lightNote:SetText("Light: green while the mob is within the first distance, yellow within the second, red beyond.")
-    y = y - 30
+    y = y - NoteHeight(lightNote, 34)
     local lightOnly = {
         Slider("Green up to (yards)", "lightGreen", 1, 45),
         Slider("Yellow up to (yards)", "lightYellow", 1, 45),
@@ -2450,12 +2554,12 @@ local function BuildContent()
 
     local numbersBlock = Block()
     Heading("Range numbers")
-    local numbersNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local numbersNote = col:CreateFontString(nil, "OVERLAY", ns.font.note)
     numbersNote:SetPoint("TOPLEFT", 20, y)
     numbersNote:SetWidth(LEFT_W - 60)
     numbersNote:SetJustifyH("LEFT")
     numbersNote:SetText("For Show as Numbers.")
-    y = y - 18
+    y = y - NoteHeight(numbersNote, 20)
     local numbersOnly = {
         Cycle("Format", "distanceFormat", DIST_FORMATS, DIST_FORMAT_LABEL),
         Cycle("Color", "distanceColor", DIST_COLORS, DIST_COLOR_LABEL),
@@ -2473,33 +2577,182 @@ local function BuildContent()
     Slider("Nameplate up / down", "plateOffsetY", -100, 100)
     Slider("Nameplate left / right", "plateOffsetX", -200, 200)
 
-    Heading("Aggro eye", "Turn it on in Where to show. The dungeon finder eye on red mobs: searching, on a yellow glow, within the warning distance of their aggro range; fixed on you, on a pulsing red glow, inside it.\n\nAn estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
-    Slider("Warn yards early", "aggroWarnYards", 0, 15)
-    Slider("Aggro eye size", "aggroSize", 10, 40)
-    Cycle("Eye glow", "eyeGlowMode", { "always", "inside", "off" }, { always = "Always", inside = "Only in range", off = "Off" })
-    Slider("Eye left / right", "eyeOffsetX", -60, 60)
-    Slider("Eye up / down", "eyeOffsetY", -40, 40)
 
-    -- Marks over the target's and the focus's nameplates, each set on its own.
-    local MARK_HELP = " The flat shapes are plain color, to sit with EllesmereUI's flat look. A black mark gets a light edge so it shows on a dark nameplate."
-    local function MarkControls(which, title, show, help)
-        local p = which .. "Mark"
-        local function Redraw() Marks.Update() end
-        Heading(title, help .. MARK_HELP)
-        Check(show, p, Redraw)
-        Cycle("Mark", p .. "Art", Marks.ARTS, Marks.ART_LABEL)
-        Cycle("Color", p .. "Color", Marks.COLORS, Marks.COLOR_LABEL)
-        Cycle("Side", p .. "Pos", Marks.POSITIONS, Marks.POSITION_LABEL)
-        Slider("Size", p .. "Size", 8, 64)
-        Slider("Left / right", p .. "X", -100, 100)
-        Slider("Up / down", p .. "Y", -100, 100)
-        Check("Bob", p .. "Bob", Redraw)
-        Slider("Bob speed", p .. "BobSpeed", 1, 10)
-        Slider("Bob distance", p .. "BobDist", 1, 30)
-        Check("Outline", p .. "Outline", Redraw)
+    -- The marks over the target's and the focus's nameplates: a switch picks which one the
+    -- controls set; each mark has a block of its own controls, one shown at a time. In a block
+    -- of its own, for the 200 locals limit.
+    do
+        local MARK_HELP = "What is drawn by a nameplate's health bar: a mark on your target's and on your focus's, so you can pick them out of a pack (the game draws none for your focus), and the aggro eye. Pick a tab to set that one.\n\nThe flat shapes are plain color, to sit with EllesmereUI's flat look. A black mark gets a light edge so it shows on a dark nameplate.\n\nThe aggro eye (turn it on in Where to show): the dungeon finder eye on red mobs, searching on a yellow glow within the warning distance of their aggro range, fixed on you on a pulsing red glow inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45)."
+        local markUI = {} -- the controls, for the switch, the graying and the tests
+        ns.markUI = markUI
+
+        -- Nearest the plate is only used with both marks on and on one side, so otherwise it
+        -- grays out (it still shows, but takes no clicks).
+        local function MarkPairState()
+            local c = markUI.nearest
+            if not c then return end
+            local on = (db.targetMark and db.focusMark and db.targetMarkPos == db.focusMarkPos) and true or false
+            c.button:SetEnabled(on)
+            local g = on and 1 or 0.5
+            c.cap:SetTextColor(g, g, g)
+        end
+        ns.MarkPairState = MarkPairState -- for the tests
+        local function Redraw()
+            Marks.Update()
+            MarkPairState()
+        end
+
+        local NAME = { target = "target mark", focus = "focus mark" }
+        local COPIED = { "Pos", "X", "Y", "Bob", "BobSpeed", "BobDist" } -- place and bob, not the look
+
+        -- One mark's controls, into col (its block).
+        local function MarkControls(which)
+            local p, other = which .. "Mark", (which == "target") and "focus" or "target"
+            local ui = { block = col }
+            markUI[which] = ui
+            ui.on = Check(which == "target" and "Mark my target" or "Mark my focus", p, Redraw)
+            Cycle("Mark", p .. "Art", Marks.ARTS, Marks.ART_LABEL)
+            Cycle("Color", p .. "Color", Marks.COLORS, Marks.COLOR_LABEL)
+            Slider("Size", p .. "Size", 8, 64)
+            Check("Outline", p .. "Outline", Redraw)
+            Cycle("Side", p .. "Pos", Marks.POSITIONS, Marks.POSITION_LABEL)
+            Slider("Left / right", p .. "X", -100, 100)
+            Slider("Up / down", p .. "Y", -100, 100)
+            Check("Bob", p .. "Bob", Redraw)
+            Slider("Bob speed", p .. "BobSpeed", 1, 10)
+            Slider("Bob distance", p .. "BobDist", 1, 30)
+            -- This mark's place and bob for the other one too (its look stays its own).
+            local copy = TryCreate("Button", nil, col, { "UIPanelButtonTemplate" })
+            copy:SetSize(LEFT_W - 70, 22)
+            copy:SetPoint("TOPLEFT", col, "TOPLEFT", 20, y - 2)
+            copy:SetText("Copy place and bob to " .. NAME[other])
+            copy:SetScript("OnClick", function()
+                for _, key in ipairs(COPIED) do db[other .. "Mark" .. key] = db[p .. key] end
+                FullRefresh()
+                RefreshOptions()
+                MarkPairState()
+            end)
+            copy:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Copy place and bob to " .. NAME[other], 1, 1, 1)
+                GameTooltip:AddLine("Gives the " .. NAME[other] .. " this mark's Side, Left / right, Up / down and bob. Its own shape, color, size and outline stay.", nil, nil, nil, true)
+                GameTooltip:Show()
+            end)
+            copy:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            ui.copy = copy
+            y = y - 32
+        end
+
+        -- The aggro eye's controls, into col (its block). Where it shows is set in Where to show.
+        local function EyeControls()
+            markUI.eye = { block = col }
+            local note = col:CreateFontString(nil, "OVERLAY", ns.font.note)
+            note:SetPoint("TOPLEFT", 20, y - 2)
+            note:SetWidth(LEFT_W - 60)
+            note:SetJustifyH("LEFT")
+            note:SetText("Turn it on in Where to show. It warns of red mobs' aggro range: see the (?) by Nameplate marks.")
+            y = y - NoteHeight(note, 34)
+            Slider("Warn yards early", "aggroWarnYards", 0, 15)
+            Slider("Aggro eye size", "aggroSize", 10, 40)
+            Cycle("Eye glow", "eyeGlowMode", { "always", "inside", "off" }, { always = "Always", inside = "Only in range", off = "Off" })
+            Cycle("Eye side", "eyeSide", { "left", "right", "above", "below" }, { left = "Left", right = "Right", above = "Above", below = "Below" })
+            Slider("Eye left / right", "eyeOffsetX", -60, 60)
+            Slider("Eye up / down", "eyeOffsetY", -40, 40)
+        end
+
+        Heading("Nameplate marks", MARK_HELP)
+        -- The tabs: which mark the controls set, as the game's own top tabs on the top edge of an
+        -- inset that holds that mark's controls (as Forager's tracks). Their selected look is
+        -- drawn here: the game's own disables the tab.
+        local editing = "target"
+        local switch = {}
+        markUI.switch = switch
+        local TABS = { "target", "focus", "eye" }
+        local TAB_TEXT = { target = "Target mark", focus = "Focus mark", eye = "Aggro eye" }
+        local TAB_H = 28
+        local TAB_W = math.min(110, math.floor((LEFT_W - 30 - 12 - 6) / #TABS))
+        local function TabLook(tab, selected)
+            local function S(region, on) if type(region) == "table" and region.SetShown then region:SetShown(on) end end
+            if tab.isBare then
+                if selected then tab:LockHighlight() else tab:UnlockHighlight() end
+            else
+                S(tab.Left, not selected) S(tab.Middle, not selected) S(tab.Right, not selected)
+                S(tab.LeftActive, selected) S(tab.MiddleActive, selected) S(tab.RightActive, selected)
+            end
+            if tab.SetNormalFontObject and GameFontHighlightSmall then
+                tab:SetNormalFontObject(selected and GameFontHighlightSmall or GameFontNormalSmall)
+            end
+            local text = tab.Text or (tab.GetFontString and tab:GetFontString())
+            if tab.isTopTab and type(text) == "table" and text.SetPoint then
+                text:ClearAllPoints()
+                text:SetPoint("CENTER", tab, "CENTER", 0, selected and -4 or -8)
+            end
+        end
+        local function ShowEditing()
+            for _, which in ipairs(TABS) do
+                markUI[which].block:SetShown(which == editing)
+                TabLook(switch[which], which == editing)
+            end
+        end
+        -- The inset, in the game's own inset art; the tabs sit on its top edge.
+        local insetTop = y - TAB_H
+        local inset, insetTemplate = TryCreate("Frame", nil, col, { "InsetFrameTemplate" })
+        inset:SetPoint("TOPLEFT", col, "TOPLEFT", 6, insetTop)
+        inset:SetWidth(LEFT_W - 30)
+        if insetTemplate == "bare" then
+            local bg = inset:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetColorTexture(0, 0, 0, 0.3)
+        end
+        markUI.inset = inset
+        -- The tabs' holder carries the sizes the game's tab code reads when a tab is shown.
+        local tabHolder = CreateFrame("Frame", nil, col)
+        tabHolder:SetPoint("BOTTOMLEFT", inset, "TOPLEFT")
+        tabHolder:SetSize(LEFT_W - 30, TAB_H)
+        tabHolder.tabPadding, tabHolder.minTabWidth, tabHolder.maxTabWidth = 0, TAB_W, TAB_W
+        for i, which in ipairs(TABS) do
+            local tab, tmpl = TryCreate("Button", "RangeLensMarkTab" .. i, tabHolder, { "PanelTopTabButtonTemplate", "UIPanelButtonTemplate" })
+            tab.isBare = tmpl ~= "PanelTopTabButtonTemplate"
+            if tab.isBare then tab:SetHeight(22) end
+            tab:SetText(TAB_TEXT[which])
+            if PanelTemplates_TabResize and not tab.isBare then
+                pcall(PanelTemplates_TabResize, tab, 0, TAB_W)
+            else
+                tab:SetWidth(TAB_W)
+            end
+            tab:SetPoint("BOTTOMLEFT", inset, "TOPLEFT", 6 + (i - 1) * (TAB_W + 3), -2)
+            tab:SetScript("OnClick", function()
+                editing = which
+                ShowEditing()
+                if ns.OnEditMark then ns.OnEditMark(which) end -- the preview follows
+            end)
+            switch[which] = tab
+        end
+        -- The blocks start at the same place inside the inset; only the picked one shows. They
+        -- keep the column's own left edge, so their controls line up with the rest.
+        local holder, blockH = col, 0
+        for _, which in ipairs(TABS) do
+            local f = CreateFrame("Frame", nil, inset)
+            f:SetPoint("TOPLEFT", inset, "TOPLEFT", -6, -8)
+            f:SetWidth(LEFT_W - 24)
+            col, y = f, 0
+            if which == "eye" then EyeControls() else MarkControls(which) end
+            f:SetHeight(-y)
+            blockH = math.max(blockH, -y)
+        end
+        inset:SetHeight(blockH + 12)
+        col, y = holder, insetTop - (blockH + 12) - 10
+        ShowEditing()
+        optionRefreshers[#optionRefreshers + 1] = ShowEditing
+        ns.EditMark = function(which) -- a mark clicked in the preview
+            editing = which
+            ShowEditing()
+        end
+
+        Heading("Target and focus on one mob", "When your target is also your focus and both marks are on the same side, one sits just beyond the other, and the pair moves as a group with the nearest one: the outer mark's own Left / right and Up / down are for when it is on a mob of its own. On a chevron, an arrow's, a diamond's or another chevron's point sits in its corner, sides parallel.\n\nEach bobs by its own Bob setting; with the same bob speed and distance they bob in step. An outer mark that bobs on its own sits out by its bob distance, so it never touches the other.")
+        markUI.nearest = Cycle("Nearest the plate", "markNearest", { "target", "focus" }, { target = "Target mark", focus = "Focus mark" })
+        optionRefreshers[#optionRefreshers + 1] = MarkPairState
     end
-    MarkControls("target", "Target mark", "Mark my target", "A mark on your target's nameplate, so you can pick it out of a pack.")
-    MarkControls("focus", "Focus mark", "Mark my focus", "A mark on your focus's nameplate; the game draws none for your focus. When your target is also your focus and both marks are on the same side, the focus mark sits just beyond the target mark and moves with it; on a chevron, its point sits in the chevron's corner.")
 
     -- Window style (Styles.lua). This page itself keeps the game's look in every style.
     Heading("Look")
@@ -2508,11 +2761,11 @@ local function BuildContent()
     styleBtn:SetSize(200, 22)
     styleBtn:SetPoint("TOPLEFT", col, "TOPLEFT", 20, y)
     styleBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    local styleNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local styleNote = col:CreateFontString(nil, "OVERLAY", ns.font.note)
     styleNote:SetPoint("TOPLEFT", 22, y - 28)
     styleNote:SetWidth(LEFT_W - 60)
     styleNote:SetJustifyH("LEFT")
-    y = y - 58
+    y = y - 70 -- its text comes later, from the style: room for three lines
     local opacity = OptionSlider(col, "Dark background opacity", "darkAlpha", 0, 100, 20, y - 4, LEFT_W - 70, {
         step = 5,
         get = function() return math.floor((db.darkAlpha or 0.92) * 100 + 0.5) end,
@@ -2529,7 +2782,8 @@ local function BuildContent()
         opacity.slider:SetEnabled(dark)
         if opacity.value.SetEnabled then opacity.value:SetEnabled(dark) end
         opacity.holder:SetAlpha(dark and 1 or 0.5)
-        opacity.caption:SetFontObject(dark and GameFontHighlight or GameFontDisable)
+        local g = dark and 1 or 0.5
+        opacity.caption:SetTextColor(g, g, g)
     end
     optionRefreshers[#optionRefreshers + 1] = ShowStyle
     styleBtn:SetScript("OnClick", function(_, button)
@@ -2584,17 +2838,19 @@ local function BuildContent()
         lightBlock = lightBlock, numbersBlock = numbersBlock, rest = rest, top = blocksTop }
 
     -- Spell list
-    local header = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local header = c:CreateFontString(nil, "OVERLAY", ns.font.head)
     header:SetPoint("TOPLEFT", LEFT_W + 10, top - 2)
     header:SetText("Spells to range check")
-    local hint = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    local hint = c:CreateFontString(nil, "OVERLAY", ns.font.note)
     hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
     hint:SetPoint("RIGHT", c, "RIGHT", -18, 0)
     hint:SetJustifyH("LEFT")
     hint:SetText("Your spellbook spells that have a range, plus spells that hit around you. Ticked spells sit at the top in icon order; < and > move one along the row. Unlock a spell to set its reach by hand.")
 
-    -- Nameplate preview: a mock plate with the icon row as it will look on
-    -- real ones. Drag an icon along the row and drop it to reorder.
+    -- Nameplate preview: mock nameplates with the icon row and everything else as they will look
+    -- on real ones, for your focus, the mob that is your target and your focus (combined), and
+    -- your target, each shown by a tick in the preview's corner: focus on the left, combined in
+    -- the middle, target on the right. Everything on them moves by mouse.
     local preview = CreateFrame("Frame", nil, c)
     -- Across the whole page, so icons moved far left or right stay in view.
     preview:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -4)
@@ -2606,100 +2862,373 @@ local function BuildContent()
     previewBg:SetColorTexture(0.12, 0.1, 0.08, 0.6)
     local previewLabel = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     previewLabel:SetPoint("TOPLEFT", 8, -6)
-    previewLabel:SetText("Nameplate preview: drag an icon to reorder")
+    previewLabel:SetJustifyH("LEFT")
+    previewLabel:SetText("Nameplate preview")
+    -- How to use it, where the eye goes first: top right, over the nameplate ticks.
+    local previewHelp = preview:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    previewHelp:SetPoint("TOPRIGHT", preview, "TOPRIGHT", -10, -6)
+    previewHelp:SetJustifyH("RIGHT")
+    previewHelp:SetText("Drag anything to move it. Mouse wheel to resize.")
+    local previewNone = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    previewNone:SetPoint("CENTER")
+    previewNone:SetText("Tick Focus, Combined or Target to see a nameplate here.")
 
-    -- The mock plate is built like the game's own (Blizzard_NamePlates on
-    -- WoW Forever): the Cooldown Manager bar art as the fill, its "Bar-BG"
-    -- plate as the frame (2 left, 3 up, 6 right, 6 down past the bar), and
-    -- the level badge 5 to the right. Default size: a 190 wide plate.
-    local plate = CreateFrame("Frame", nil, preview)
-    plate:SetAllPoints()
-    local mockBar = plate:CreateTexture(nil, "ARTWORK")
-    mockBar:SetPoint("CENTER", preview, "CENTER", 0, 0)
-    if HasAtlas("UI-HUD-CoolDownManager-Bar") then
-        mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar")
-    else
-        mockBar:SetColorTexture(1, 1, 1, 1)
-    end
-    mockBar:SetVertexColor(0.9, 0.15, 0.1)
-    local mockFrame = plate:CreateTexture(nil, "BACKGROUND")
-    if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then
-        mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG")
-    else
-        mockFrame:SetColorTexture(0, 0, 0, 0.9)
-    end
-    mockFrame:SetPoint("TOPLEFT", mockBar, "TOPLEFT", -2, 3)
-    mockFrame:SetPoint("BOTTOMRIGHT", mockBar, "BOTTOMRIGHT", 6, -6)
-    local mockLevel = plate:CreateTexture(nil, "BACKGROUND")
-    if HasAtlas("ui-hud-nameplates-levelindicator") then
-        mockLevel:SetAtlas("ui-hud-nameplates-levelindicator")
-    else
-        mockLevel:SetColorTexture(0, 0, 0, 0.7)
-    end
-    mockLevel:SetPoint("LEFT", mockBar, "RIGHT", 4, -1)
-    local mockLevelText = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlateLevel and "SystemFont_NamePlateLevel" or "GameFontHighlightSmall")
-    mockLevelText:SetPoint("CENTER", mockLevel, "CENTER", 0, 0)
-    mockLevelText:SetText("8")
-    local mockName = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlate and "SystemFont_NamePlate" or "GameFontHighlightSmall")
-    mockName:SetPoint("BOTTOM", mockBar, "TOP", 0, 2)
-    mockName:SetText("Elder Mottled Boar")
-    local mockBorder = mockBar -- the icon row hangs off the health bar, as on real plates
-    c.mock = { plate = plate, bar = mockBar, frame = mockFrame, preview = preview } -- for ns.DrawEuiPreview
+    local MOCK_KINDS = { "focus", "combined", "target" } -- left to right
+    local MOCK_TITLE = { focus = "Your focus", combined = "Your target, also your focus", target = "Your target" }
+    local MOCK_KEY = { focus = "previewFocus", combined = "previewCombined", target = "previewTarget" }
+    local mocks = {}
 
-    local prow = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
-    prow.aggro = MakeAggroEye(prow)
-    prow.rangeLight = MakeLight(prow)
-    prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-    prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
-    local pmarks = { target = Marks.Make(plate), focus = Marks.Make(plate) } -- as if this mob were both
-    local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    previewEmpty:SetPoint("TOP", mockBorder, "BOTTOM", 0, -10)
+    -- One mock plate, built like the game's own (Blizzard_NamePlates on WoW Forever): the
+    -- Cooldown Manager bar art as the fill, its "Bar-BG" plate as the frame (2 left, 3 up,
+    -- 6 right, 6 down past the bar), and the level badge 5 to the right. With its icon row,
+    -- aggro eye, range number and light, marks, a drop placeholder for icons and drop zones.
+    local function BuildMock(kind)
+        local mp = { kind = kind }
+        local plate = CreateFrame("Frame", nil, preview)
+        plate:SetAllPoints()
+        mp.plate = plate
+        local bar = plate:CreateTexture(nil, "ARTWORK")
+        bar:SetPoint("CENTER", preview, "CENTER", 0, 0)
+        if HasAtlas("UI-HUD-CoolDownManager-Bar") then bar:SetAtlas("UI-HUD-CoolDownManager-Bar") else bar:SetColorTexture(1, 1, 1, 1) end
+        bar:SetVertexColor(0.9, 0.15, 0.1)
+        mp.bar = bar
+        local frame = plate:CreateTexture(nil, "BACKGROUND")
+        if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then frame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") else frame:SetColorTexture(0, 0, 0, 0.9) end
+        frame:SetPoint("TOPLEFT", bar, "TOPLEFT", -2, 3)
+        frame:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 6, -6)
+        mp.frame = frame
+        local level = plate:CreateTexture(nil, "BACKGROUND")
+        if HasAtlas("ui-hud-nameplates-levelindicator") then level:SetAtlas("ui-hud-nameplates-levelindicator") else level:SetColorTexture(0, 0, 0, 0.7) end
+        level:SetPoint("LEFT", bar, "RIGHT", 4, -1)
+        mp.level = level
+        local levelText = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlateLevel and "SystemFont_NamePlateLevel" or "GameFontHighlightSmall")
+        levelText:SetPoint("CENTER", level, "CENTER", 0, 0)
+        levelText:SetText("8")
+        mp.levelText = levelText
+        local name = plate:CreateFontString(nil, "OVERLAY", _G.SystemFont_NamePlate and "SystemFont_NamePlate" or "GameFontHighlightSmall")
+        name:SetPoint("BOTTOM", bar, "TOP", 0, 2)
+        name:SetText("Elder Mottled Boar")
+        mp.name = name
+        local row = CreateFrame("Frame", nil, plate) -- scaled with the mock plate
+        row.aggro = MakeAggroEye(row)
+        row.rangeLight = MakeLight(row)
+        row.distance = row:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        row.distance:SetPoint("LEFT", row, "RIGHT", 4, 0)
+        row.mock = mp
+        mp.row = row
+        mp.marks = { target = Marks.Make(plate), focus = Marks.Make(plate) }
+        mp.empty = plate:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        mp.empty:SetPoint("TOP", bar, "BOTTOM", 0, -10)
+        mp.title = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        mp.title:SetText(MOCK_TITLE[kind])
+        -- Drop placeholder: an outlined gap where a dragged icon will land.
+        local ph = CreateFrame("Frame", nil, row)
+        ph:Hide()
+        local phFill = ph:CreateTexture(nil, "BACKGROUND")
+        phFill:SetAllPoints()
+        phFill:SetColorTexture(1, 0.82, 0, 0.15)
+        for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+            local t = ph:CreateTexture(nil, "BORDER")
+            t:SetColorTexture(1, 0.82, 0, 0.9)
+            if side == "TOP" or side == "BOTTOM" then
+                t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1)
+            else
+                t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
+            end
+        end
+        mp.placeholder = ph
+        -- The drop zones, in the mock plate's units like the bar.
+        local zoneLayer = CreateFrame("Frame", nil, plate)
+        zoneLayer:SetAllPoints()
+        zoneLayer:SetFrameLevel(plate:GetFrameLevel() + 60)
+        zoneLayer:Hide()
+        mp.zoneLayer, mp.zones = zoneLayer, {}
+        for _, side in ipairs({ "above", "below", "left", "right" }) do
+            mp.zones[side] = zoneLayer:CreateTexture(nil, "OVERLAY")
+        end
+        return mp
+    end
+    for _, kind in ipairs(MOCK_KINDS) do mocks[kind] = BuildMock(kind) end
 
-    -- Drop placeholder: an outlined gap where the dragged icon will land.
-    local placeholder = CreateFrame("Frame", nil, prow)
-    placeholder:Hide()
-    local phFill = placeholder:CreateTexture(nil, "BACKGROUND")
-    phFill:SetAllPoints()
-    phFill:SetColorTexture(1, 0.82, 0, 0.15)
-    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-        local t = placeholder:CreateTexture(nil, "BORDER")
-        t:SetColorTexture(1, 0.82, 0, 0.9)
-        if side == "TOP" or side == "BOTTOM" then
-            t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1)
-        else
-            t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
+    -- A mock's marks: your target's on the target plate, your focus's on the focus plate, both
+    -- on the combined one (on one side, stacked as in game).
+    local function MockMarks(mp)
+        Marks.ShowPair(mp.marks, mp.kind ~= "focus" and mp.bar or nil, mp.kind ~= "target" and mp.bar or nil)
+    end
+
+    -- The icon row hangs off the health bar, as on real plates.
+    local function PlaceRow(mp)
+        mp.row:ClearAllPoints()
+        mp.row:SetPoint("TOP", mp.bar, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
+    end
+
+    -- Moving things in the preview with the mouse: drag a mark, the aggro eye or the range
+    -- number or light to move it (its Left / right and Up / down); drag it onto another side of
+    -- the health bar (for the range, of the icon row) to put it there. While dragging, the sides
+    -- it can go to show, and the one under the cursor lights up. A mark holds still while
+    -- dragged. Shift-drag an icon to move the rows. The mouse wheel sets sizes.
+    local ZONE_DEPTH, ZONE_REACH = 40, 10 -- how far out a side's drop area reaches, and past the ends
+
+    -- The drop areas around `region` (a mock's bar or icon row), in screen pixels as
+    -- GetCursorPosition gives them, and the side whose area the cursor is in.
+    local function ZoneAt(mp, region)
+        local es = mp.plate:GetEffectiveScale() or 1
+        local l, r, t, b = region:GetLeft(), region:GetRight(), region:GetTop(), region:GetBottom()
+        if not (l and r and t and b) then return nil end
+        l, r, t, b = l * es, r * es, t * es, b * es
+        local d, e = ZONE_DEPTH * es, ZONE_REACH * es
+        local rects = {
+            above = { l, r, t, t + d }, below = { l, r, b - d, b },
+            left = { l - d, l, b - e, t + e }, right = { r, r + d, b - e, t + e },
+        }
+        local x, y = GetCursorPosition()
+        for side, q in pairs(rects) do
+            if x >= q[1] and x <= q[2] and y >= q[3] and y <= q[4] then return side end
         end
     end
 
+    -- Every side it can go to shows; the one it is on is tinted, the one under the cursor gold.
+    local function ShowZones(mp, region, current, hot)
+        for side, z in pairs(mp.zones) do
+            z:ClearAllPoints()
+            if side == "above" then
+                z:SetPoint("BOTTOMLEFT", region, "TOPLEFT", 0, 0)
+                z:SetPoint("TOPRIGHT", region, "TOPRIGHT", 0, ZONE_DEPTH)
+            elseif side == "below" then
+                z:SetPoint("TOPLEFT", region, "BOTTOMLEFT", 0, 0)
+                z:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, -ZONE_DEPTH)
+            elseif side == "left" then
+                z:SetPoint("TOPRIGHT", region, "TOPLEFT", 0, ZONE_REACH)
+                z:SetPoint("BOTTOMLEFT", region, "BOTTOMLEFT", -ZONE_DEPTH, -ZONE_REACH)
+            else
+                z:SetPoint("TOPLEFT", region, "TOPRIGHT", 0, ZONE_REACH)
+                z:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", ZONE_DEPTH, -ZONE_REACH)
+            end
+            if side == hot then
+                z:SetColorTexture(1, 0.82, 0, 0.45)
+            elseif side == current then
+                z:SetColorTexture(1, 0.82, 0, 0.16)
+            else
+                z:SetColorTexture(1, 1, 1, 0.12)
+            end
+        end
+        mp.zoneLayer:Show()
+    end
+
+    -- One drag at a time. spec: units (the frame whose scale its offsets are in), xr / yr (the
+    -- offsets' limits), get() -> side, x, y, set(x, y), live() to redraw it; with zones, mp (its
+    -- mock), region (what its sides are of) and attach(side); start() and stop() if it needs them.
+    local drag
+    local dragDriver = CreateFrame("Frame", nil, preview)
+    dragDriver:Hide()
+    local function DragUpdate()
+        local d = drag
+        if not d then return end
+        local cx, cy = GetCursorPosition()
+        local scale = d.units:GetEffectiveScale() or 1
+        local x = math.floor(math.max(-d.xr, math.min(d.xr, d.x0 + (cx - d.cx) / scale)) + 0.5)
+        local y = math.floor(math.max(-d.yr, math.min(d.yr, d.y0 + (cy - d.cy) / scale)) + 0.5)
+        d.set(x, y)
+        if d.region then
+            local hot = ZoneAt(d.mp, d.region)
+            d.hot = (hot ~= d.side) and hot or nil
+            ShowZones(d.mp, d.region, d.side, d.hot)
+        end
+        d.live()
+    end
+    dragDriver:SetScript("OnUpdate", DragUpdate)
+
+    local function StartPreviewDrag(spec)
+        spec.side, spec.x0, spec.y0 = spec.get()
+        spec.cx, spec.cy = GetCursorPosition()
+        drag = spec
+        if spec.start then spec.start() end
+        if spec.region then ShowZones(spec.mp, spec.region, spec.side, nil) end
+        dragDriver:Show()
+    end
+
+    local function StopPreviewDrag()
+        local d = drag
+        if not d then return end
+        DragUpdate() -- where it was let go
+        drag = nil
+        dragDriver:Hide()
+        if d.mp then d.mp.zoneLayer:Hide() end
+        if d.hot then
+            -- Dropped on another side: it goes there, at that side's own place, and what the
+            -- drag moved goes back.
+            d.set(d.x0, d.y0)
+            d.attach(d.hot)
+        end
+        if d.stop then d.stop() end
+        FullRefresh()
+        RefreshOptions()
+    end
+
+    -- A size by mouse wheel, within its slider's limits.
+    local function Wheel(frame, key, minV, maxV, fallback)
+        frame:EnableMouseWheel(true)
+        frame:SetScript("OnMouseWheel", function(_, delta)
+            db[key] = math.max(minV, math.min(maxV, (db[key] or fallback) + delta))
+            FullRefresh()
+            RefreshOptions()
+        end)
+    end
+
+    local function Hint(frame, title, text)
+        frame:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(title, 1, 1, 1)
+            GameTooltip:AddLine(text, 0.7, 0.7, 0.7, true)
+            GameTooltip:Show()
+        end)
+        frame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    -- A mock's marks, eye and range, by mouse.
+    local function MouseMock(mp)
+        local bar, row = mp.bar, mp.row
+        -- The marks: on the combined plate, on one side with the other mark, the pair moves as a
+        -- group, so a drag moves the nearest mark's offsets; dropped on another side, the dragged
+        -- mark goes there alone. A click picks it in the options.
+        local function Hold(on)
+            mp.marks.target.held, mp.marks.focus.held = on, on
+            MockMarks(mp)
+        end
+        for _, which in ipairs({ "target", "focus" }) do
+            local m, own = mp.marks[which], which .. "Mark"
+            m:EnableMouse(true)
+            m:RegisterForDrag("LeftButton")
+            m:SetScript("OnMouseDown", function() if ns.EditMark then ns.EditMark(which) end end)
+            m:SetScript("OnDragStart", function()
+                local stacked = mp.kind == "combined" and db.targetMark and db.focusMark and db.targetMarkPos == db.focusMarkPos
+                local moved = (stacked and (db.markNearest == "focus" and "focus" or "target") or which) .. "Mark"
+                StartPreviewDrag({
+                    units = m, xr = 100, yr = 100, mp = mp, region = bar,
+                    get = function() return db[own .. "Pos"], db[moved .. "X"] or 0, db[moved .. "Y"] or 0 end,
+                    set = function(x, y) db[moved .. "X"], db[moved .. "Y"] = x, y end,
+                    attach = function(side) db[own .. "Pos"], db[own .. "X"], db[own .. "Y"] = side, 0, 0 end,
+                    live = function() MockMarks(mp) end,
+                    start = function() Hold(true) end,
+                    stop = function() Hold(false) end,
+                })
+            end)
+            m:SetScript("OnDragStop", StopPreviewDrag)
+            Wheel(m, own .. "Size", 8, 64, 20)
+            Hint(m, which == "target" and "Target mark" or "Focus mark",
+                "Drag to move it; drag it onto another side of the health bar to put it there. Mouse wheel: size. Click to set it in the options.")
+        end
+
+        -- The aggro eye: its offsets, and its side of the health bar.
+        local eye = row.aggro
+        eye:EnableMouse(true)
+        eye:RegisterForDrag("LeftButton")
+        eye:SetScript("OnDragStart", function()
+            StartPreviewDrag({
+                units = row, xr = 60, yr = 40, mp = mp, region = bar,
+                get = function() return db.eyeSide or "left", db.eyeOffsetX or 0, db.eyeOffsetY or 0 end,
+                set = function(x, y) db.eyeOffsetX, db.eyeOffsetY = x, y end,
+                attach = function(side) db.eyeSide, db.eyeOffsetX, db.eyeOffsetY = side, 0, 0 end,
+                live = function() AnchorEye(eye, bar) end,
+            })
+        end)
+        eye:SetScript("OnDragStop", StopPreviewDrag)
+        eye:SetScript("OnMouseDown", function() if ns.EditMark then ns.EditMark("eye") end end)
+        Wheel(eye, "aggroSize", 10, 40, 20)
+        Hint(eye, "Aggro eye", "Drag to move it; drag it onto another side of the health bar to put it there. Mouse wheel: size. Click to set it in the options.")
+
+        -- The range number (a frame over the text, which takes no mouse itself) and the light:
+        -- their offsets, and their side of the icon row (Position).
+        local rangeHit = CreateFrame("Frame", nil, row)
+        rangeHit:SetPoint("TOPLEFT", row.distance, "TOPLEFT", -3, 3)
+        rangeHit:SetPoint("BOTTOMRIGHT", row.distance, "BOTTOMRIGHT", 3, -3)
+        mp.rangeHit = rangeHit
+        for _, f in ipairs({ rangeHit, row.rangeLight }) do
+            f:EnableMouse(true)
+            f:RegisterForDrag("LeftButton")
+            f:SetScript("OnDragStart", function()
+                StartPreviewDrag({
+                    units = row, xr = 60, yr = 40, mp = mp, region = row,
+                    get = function() return db.distancePosition or "right", db.distanceX or 0, db.distanceY or 0 end,
+                    set = function(x, y) db.distanceX, db.distanceY = x, y end,
+                    attach = function(side) db.distancePosition, db.distanceX, db.distanceY = side, 0, 0 end,
+                    live = function() ShowDistance(row.distance, row.rangeLight, row, FormatDistance(10, 15), 10, 15) end,
+                })
+            end)
+            f:SetScript("OnDragStop", StopPreviewDrag)
+            Wheel(f, "distanceSize", 8, 28, 14)
+            Hint(f, "Range", "Drag to move it; drag it onto another side of the icons to put it there. Mouse wheel: size.")
+        end
+    end
+    for _, mp in pairs(mocks) do MouseMock(mp) end
+
+    -- The ticks: which mock plates show, in their order left to right.
+    local toggles = {}
+    local TOGGLE_X = { focus = -250, combined = -170, target = -70 }
+    for _, kind in ipairs(MOCK_KINDS) do
+        local cb = CreateCheck(preview, kind == "focus" and "Focus" or (kind == "combined" and "Combined" or "Target"))
+        cb:SetPoint("TOPLEFT", preview, "TOPRIGHT", TOGGLE_X[kind], -24)
+        cb:SetScript("OnClick", function(self)
+            db[MOCK_KEY[kind]] = self:GetChecked() and true or false
+            c:UpdatePreview()
+        end)
+        Hint(cb, MOCK_TITLE[kind], kind == "combined" and "Show the nameplate of a mob that is your target and your focus: both marks, stacked as in game when they are on one side."
+            or ("Show the nameplate of " .. (kind == "focus" and "your focus" or "your target") .. ", as a mob of its own: its mark, and what Where to show puts on it."))
+        toggles[kind] = cb
+    end
+    -- The caption ends before the instructions (wrapping if the page is narrow).
+    previewLabel:SetPoint("RIGHT", previewHelp, "LEFT", -12, 0)
+
+    -- Picking a mark in the options shows a plate with it, if none does yet.
+    ns.OnEditMark = function(which)
+        if which ~= "target" and which ~= "focus" then return end
+        local key = which == "focus" and "previewFocus" or "previewTarget"
+        if not (db[key] or db.previewCombined) then
+            db[key] = true
+            c:UpdatePreview()
+        end
+    end
+    ns.previewParts = { mocks = mocks, driver = dragDriver, toggles = toggles } -- for the tests
+
+    -- Icons: drag one along its row and drop it to reorder (any row: there is one order).
     local function DragSlot(icon)
-        local cx, left = icon:GetCenter(), prow:GetLeft()
+        local row = icon:GetParent()
+        local cx, left = icon:GetCenter(), row:GetLeft()
         if not (cx and left) then return nil end
         local slot = math.floor((cx - left) / (db.plateIconSize + 2)) + 1
-        return math.max(1, math.min(prow.count or 1, slot))
+        return math.max(1, math.min(row.count or 1, slot))
     end
 
     -- Lay the other icons out around a gap at `slot`, with the placeholder in it.
     local function ShowGap(dragged, slot)
+        local row = dragged:GetParent()
+        local placeholder = row.mock.placeholder
         local size, step = db.plateIconSize, db.plateIconSize + 2
         local k = 0
-        for i = 1, prow.count or 0 do
-            local icon = prow.icons[i]
+        for i = 1, row.count or 0 do
+            local icon = row.icons[i]
             if icon ~= dragged then
                 k = k + 1
                 if k == slot then k = k + 1 end
                 icon:ClearAllPoints()
-                icon:SetPoint("LEFT", prow, "LEFT", (k - 1) * step, 0)
+                icon:SetPoint("LEFT", row, "LEFT", (k - 1) * step, 0)
             end
         end
         placeholder:SetSize(size, size)
         placeholder:ClearAllPoints()
-        placeholder:SetPoint("LEFT", prow, "LEFT", (slot - 1) * step, 0)
+        placeholder:SetPoint("LEFT", row, "LEFT", (slot - 1) * step, 0)
         placeholder:Show()
     end
 
     local function DropIcon(icon)
-        prow:SetScript("OnUpdate", nil)
-        placeholder:Hide()
+        if icon.movingRow then
+            icon.movingRow = nil
+            StopPreviewDrag()
+            return
+        end
+        local row = icon:GetParent()
+        row:SetScript("OnUpdate", nil)
+        row.mock.placeholder:Hide()
         icon:StopMovingOrSizing()
         local slot = DragSlot(icon)
         if slot and icon.spell then
@@ -2711,10 +3240,22 @@ local function BuildContent()
     end
 
     local function StartDrag(icon)
-        icon:SetFrameLevel(prow:GetFrameLevel() + 20)
+        local row = icon:GetParent()
+        if IsShiftKeyDown and IsShiftKeyDown() then
+            -- Shift: the rows move (Nameplate up / down and left / right).
+            icon.movingRow = true
+            StartPreviewDrag({
+                units = row, xr = 200, yr = 100,
+                get = function() return nil, db.plateOffsetX or 0, db.plateOffsetY or 0 end,
+                set = function(x, y) db.plateOffsetX, db.plateOffsetY = x, y end,
+                live = function() for _, mp in pairs(mocks) do PlaceRow(mp) end end,
+            })
+            return
+        end
+        icon:SetFrameLevel(row:GetFrameLevel() + 20)
         icon:StartMoving()
         local last
-        prow:SetScript("OnUpdate", function()
+        row:SetScript("OnUpdate", function()
             local slot = DragSlot(icon)
             if slot and slot ~= last then
                 last = slot
@@ -2723,115 +3264,154 @@ local function BuildContent()
         end)
     end
 
-    function c:UpdatePreview()
-        -- Real plate size and the scale its icon row is drawn at, measured
-        -- from a nameplate in game (see OnPlateAdded); defaults until then.
-        local look, measured = PlateLook()
-        local pe = preview:GetEffectiveScale() or 1
-        if not (pe and pe > 0) then pe = 1 end
-        -- The whole mock plate (bar, frame, badge, name, icon row) is drawn at the
-        -- real row's scale, so fonts and icons come out the size they are in game.
-        -- Draw at the options window's own scale, the way the game's nameplate
-        -- preview is, whatever scale this page itself is shown at.
-        local rowScale = look.rowScale or 1
-        local isClassic
-        -- Which plate to draw: EllesmereUI's (drawn from its own settings), the game's Classic
-        -- style, or the game's others.
-        local size, style = PlateSettings()
-        local h, v = PlateScale(size, style)
-        isClassic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+    local function SetUpIcon(icon)
+        if icon.draggable then return end
+        icon.draggable = true
+        icon:EnableMouse(true)
+        icon:SetMovable(true)
+        icon:RegisterForDrag("LeftButton")
+        icon:SetScript("OnDragStart", StartDrag)
+        icon:SetScript("OnDragStop", DropIcon)
+        icon:EnableMouseWheel(true)
+        icon:SetScript("OnMouseWheel", function(_, delta)
+            db.plateIconSize = math.max(8, math.min(40, (db.plateIconSize or 18) + delta))
+            FullRefresh()
+            RefreshOptions()
+        end)
+        icon:SetScript("OnEnter", function(self)
+            if not self.spell then return end
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(self.spell.query, 1, 1, 1)
+            GameTooltip:AddLine("Drag to reorder; shift-drag to move the row. Mouse wheel: icon size.", 0.7, 0.7, 0.7, true)
+            GameTooltip:Show()
+        end)
+        icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    -- Draw one mock plate: EllesmereUI's (drawn from its own settings), the game's Classic
+    -- style, or the game's others. Returns the label's note.
+    local function DrawMock(mp, look, measured, pe, h, v, isClassic)
         local kind = look.eui and "eui" or (isClassic and "classic" or "modern")
-        if kind ~= c.lookKind then
-            c.lookKind = kind
+        if kind ~= mp.lookKind then
+            mp.lookKind = kind
             local game = kind ~= "eui"
-            mockName:SetShown(game)
-            mockLevel:SetShown(game)
-            mockLevelText:SetShown(game)
+            mp.name:SetShown(game)
+            mp.level:SetShown(game)
+            mp.levelText:SetShown(game)
             if not game then
-                mockBar:SetTexture("Interface\\Buttons\\WHITE8X8")
+                mp.bar:SetTexture("Interface\\Buttons\\WHITE8X8")
             else
-                if c.mock.texts then for _, fs in pairs(c.mock.texts) do fs:Hide() end end
-                if c.mock.glow then for _, t in ipairs(c.mock.glow) do t:Hide() end end
-                mockFrame:ClearAllPoints()
-                mockFrame:SetTexCoord(0, 1, 0, 1)
-                mockFrame:SetPoint("TOPLEFT", mockBar, "TOPLEFT", -2, 3)
-                mockFrame:SetPoint("BOTTOMRIGHT", mockBar, "BOTTOMRIGHT", 6, -6)
+                if mp.texts then for _, fs in pairs(mp.texts) do fs:Hide() end end
+                if mp.glow then for _, t in ipairs(mp.glow) do t:Hide() end end
+                mp.frame:ClearAllPoints()
+                mp.frame:SetTexCoord(0, 1, 0, 1)
+                mp.frame:SetPoint("TOPLEFT", mp.bar, "TOPLEFT", -2, 3)
+                mp.frame:SetPoint("BOTTOMRIGHT", mp.bar, "BOTTOMRIGHT", 6, -6)
                 -- The Classic style draws the old bar and border; the others the Cooldown Manager bar.
                 if kind == "classic" then
-                    mockBar:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill")
-                    mockFrame:SetTexture("Interface\\Tooltips\\Nameplate-Border")
-                    mockFrame:SetTexCoord(0, 1, 0.5, 1)
+                    mp.bar:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-BarFill")
+                    mp.frame:SetTexture("Interface\\Tooltips\\Nameplate-Border")
+                    mp.frame:SetTexCoord(0, 1, 0.5, 1)
                 else
-                    if HasAtlas("UI-HUD-CoolDownManager-Bar") then mockBar:SetAtlas("UI-HUD-CoolDownManager-Bar") end
-                    if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then mockFrame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") end
+                    if HasAtlas("UI-HUD-CoolDownManager-Bar") then mp.bar:SetAtlas("UI-HUD-CoolDownManager-Bar") end
+                    if HasAtlas("UI-HUD-CoolDownManager-Bar-BG") then mp.frame:SetAtlas("UI-HUD-CoolDownManager-Bar-BG") end
                 end
-                mockBar:SetVertexColor(0.9, 0.15, 0.1)
+                mp.bar:SetVertexColor(0.9, 0.15, 0.1)
             end
         end
-        local note
-        if kind == "eui" then
-            note = ns.DrawEuiPreview(c.mock, look, measured, pe)
-        else
-            -- Draw at the options window's own scale, the way the game's nameplate
-            -- preview is, whatever scale this page itself is shown at.
-            local ref = (SettingsPanel and SettingsPanel:IsShown() and SettingsPanel) or UIParent
-            local okRef, refScale = pcall(ref.GetEffectiveScale, ref)
-            if not okRef or type(refScale) ~= "number" or refScale <= 0 then refScale = pe end
-            plate:SetScale(rowScale * refScale / pe)
-            mockBar:SetSize(look.w / rowScale, look.h / rowScale)
-            mockLevel:SetSize(28 * h, 16 * h)
-            -- Font sizes follow the Size setting, as Blizzard_NamePlates sets them:
-            -- the name at 14 (10 for Classic) and the level at 10, times the vertical scale.
-            if mockName.SetTextHeight then mockName:SetTextHeight((isClassic and 10 or 14) * v) end
-            if mockLevelText.SetTextHeight then mockLevelText:SetTextHeight(10 * v) end
-            note = measured and "|cff80ff80Matches your nameplate settings.|r"
-                or "|cffffd060Estimated until a nameplate is on screen.|r"
-        end
-        previewLabel:SetText("Nameplate preview: drag an icon to reorder.  " .. note)
-        LayoutRow(prow, db.plateIconSize, 2, false)
-        prow:ClearAllPoints()
-        prow:SetPoint("TOP", mockBorder, "BOTTOM", db.plateOffsetX, db.plateOffsetY)
-        for i = 1, prow.count or 0 do
-            local icon = prow.icons[i]
+        if kind == "eui" then return ns.DrawEuiPreview(mp, look, measured, pe) end
+        -- Draw at the options window's own scale, the way the game's nameplate preview is,
+        -- whatever scale this page itself is shown at; the whole mock plate (bar, frame, badge,
+        -- name, icon row) at the real row's scale, so fonts and icons come out the size they
+        -- are in game.
+        local rowScale = look.rowScale or 1
+        local ref = (SettingsPanel and SettingsPanel:IsShown() and SettingsPanel) or UIParent
+        local okRef, refScale = pcall(ref.GetEffectiveScale, ref)
+        if not okRef or type(refScale) ~= "number" or refScale <= 0 then refScale = pe end
+        mp.plate:SetScale(rowScale * refScale / pe)
+        mp.bar:SetSize(look.w / rowScale, look.h / rowScale)
+        mp.level:SetSize(28 * h, 16 * h)
+        -- Font sizes follow the Size setting, as Blizzard_NamePlates sets them: the name at 14
+        -- (10 for Classic) and the level at 10, times the vertical scale.
+        if mp.name.SetTextHeight then mp.name:SetTextHeight((isClassic and 10 or 14) * v) end
+        if mp.levelText.SetTextHeight then mp.levelText:SetTextHeight(10 * v) end
+        return measured and "|cff80ff80Matches your nameplate settings.|r"
+            or "|cffffd060Estimated until a nameplate is on screen.|r"
+    end
+
+    -- What a mock plate carries: its icon row, eye, marks and range, as Where to show puts them
+    -- on such a mob.
+    local function FillMock(mp)
+        local row = mp.row
+        LayoutRow(row, db.plateIconSize, 2, false)
+        PlaceRow(mp)
+        for i = 1, row.count or 0 do
+            local icon = row.icons[i]
             icon:Show()
             icon:SetAlpha(1)
             icon.lit:SetAlpha(1)
             SetLook(icon, "in")
-            if not icon.draggable then
-                icon.draggable = true
-                icon:EnableMouse(true)
-                icon:SetMovable(true)
-                icon:RegisterForDrag("LeftButton")
-                icon:SetScript("OnDragStart", StartDrag)
-                icon:SetScript("OnDragStop", DropIcon)
-                icon:SetScript("OnEnter", function(self)
-                    if not self.spell then return end
-                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                    GameTooltip:SetText(self.spell.query, 1, 1, 1)
-                    GameTooltip:AddLine("Drag to reorder", 0.7, 0.7, 0.7)
-                    GameTooltip:Show()
-                end)
-                icon:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            SetUpIcon(icon)
+        end
+        AnchorEye(row.aggro, mp.bar)
+        ShowAggroMark(row.aggro, ShowInPreview("aggro", mp.kind) and "near" or nil)
+        MockMarks(mp)
+        if ShowInPreview("distance", mp.kind) then
+            ShowDistance(row.distance, row.rangeLight, row, FormatDistance(10, 15), 10, 15)
+        else
+            ShowDistance(row.distance, row.rangeLight, row, nil, nil, nil)
+        end
+        local plateIcons = ShowInPreview("icons", mp.kind)
+        for i = 1, row.count or 0 do row.icons[i]:SetShown(plateIcons) end
+        row:Show()
+        if not plateIcons then
+            mp.empty:SetText("Spell icons are off for this nameplate (see Where to show).")
+        elseif (row.count or 0) == 0 then
+            mp.empty:SetText("Tick spells below to see them here.")
+        else
+            mp.empty:SetText("")
+        end
+    end
+
+    function c:UpdatePreview()
+        -- Real plate size and the scale its icon row is drawn at, measured from a nameplate in
+        -- game (see OnPlateAdded); defaults until then.
+        local look, measured = PlateLook()
+        local pe = preview:GetEffectiveScale() or 1
+        if not (pe and pe > 0) then pe = 1 end
+        local size, style = PlateSettings()
+        local h, v = PlateScale(size, style)
+        local isClassic = Enum and Enum.NamePlateStyle and style == Enum.NamePlateStyle.Classic
+        -- The ticked plates, left to right across the preview, each in its share of the width.
+        local shown = {}
+        for _, kind in ipairs(MOCK_KINDS) do
+            local on = db[MOCK_KEY[kind]] and true or false
+            toggles[kind]:SetChecked(on)
+            if on then shown[#shown + 1] = mocks[kind] end
+            if not on then
+                mocks[kind].plate:Hide()
+                mocks[kind].title:Hide()
             end
         end
-        AnchorEye(prow.aggro, mockBar)
-        ShowAggroMark(prow.aggro, ShowOnAnyPlate("aggro") and "near" or nil)
-        Marks.ShowPair(pmarks, mockBar, mockBar)
-        if ShowOnAnyPlate("distance") then
-            ShowDistance(prow.distance, prow.rangeLight, prow, FormatDistance(10, 15), 10, 15)
-        else
-            ShowDistance(prow.distance, prow.rangeLight, prow, nil, nil, nil)
+        local width = preview:GetWidth()
+        if type(width) ~= "number" or width <= 0 then width = W - 24 end
+        local share = width / math.max(1, #shown)
+        local note = ""
+        for i, mp in ipairs(shown) do
+            mp.plate:Show()
+            note = DrawMock(mp, look, measured, pe, h, v, isClassic)
+            local x = (i - (#shown + 1) / 2) * share
+            local scale = mp.plate:GetScale()
+            if type(scale) ~= "number" or scale <= 0 then scale = 1 end
+            mp.bar:ClearAllPoints()
+            mp.bar:SetPoint("CENTER", preview, "CENTER", x / scale, -8 / scale) -- under the ticks
+            mp.title:ClearAllPoints()
+            mp.title:SetPoint("BOTTOM", preview, "BOTTOM", x, 6)
+            mp.title:SetShown(#shown > 1)
+            FillMock(mp)
         end
-        local plateIcons = ShowOnAnyPlate("icons")
-        for i = 1, prow.count or 0 do prow.icons[i]:SetShown(plateIcons) end
-        prow:Show()
-        if not plateIcons then
-            previewEmpty:SetText("Spell icons are off for nameplates (see Where to show).")
-        elseif (prow.count or 0) == 0 then
-            previewEmpty:SetText("Tick spells below to see them here.")
-        else
-            previewEmpty:SetText("")
-        end
+        previewNone:SetShown(#shown == 0)
+        previewLabel:SetText("Nameplate preview.  " .. note)
     end
     previewHook = function() if c:IsVisible() then c:UpdatePreview() end end
     ns.RefreshPreview = previewHook
@@ -2840,7 +3420,7 @@ local function BuildContent()
     local areaBg = area:CreateTexture(nil, "BACKGROUND")
     areaBg:SetAllPoints()
     areaBg:SetColorTexture(0, 0, 0, 0.35)
-    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 50)
+    area:SetPoint("TOPLEFT", c, "TOPLEFT", LEFT_W + 4, top - 74) -- under the header and three lines of hint
     area:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -12, 36)
 
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", "RangeLensOptionsScroll", c, "RangeLensScrollFrameTemplate")
@@ -2875,12 +3455,12 @@ local function BuildContent()
         row.icon = CreateIcon(row)
         SizeIcon(row.icon, 20, false)
         row.icon:SetPoint("LEFT", row.check, "RIGHT", 6, 0)
-        row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        row.name = row:CreateFontString(nil, "OVERLAY", ns.font.text)
         row.name:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -3)
         row.name:SetPoint("RIGHT", row, "RIGHT", -30, 0)
         row.name:SetJustifyH("LEFT")
         row.name:SetWordWrap(false)
-        row.order = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.order = row:CreateFontString(nil, "OVERLAY", ns.font.number)
         row.order:SetPoint("TOPRIGHT", -6, -6)
 
         -- < and >: move a tracked spell's icon one place left or right in the row.
@@ -2947,7 +3527,7 @@ local function BuildContent()
         box:SetJustifyH("CENTER")
         if not box:GetFontObject() then box:SetFontObject(ChatFontNormal) end
         row.box = box
-        local unit = row.tuner:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        local unit = row.tuner:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         unit:SetPoint("LEFT", box, "RIGHT", 4, 0)
         unit:SetText("yd")
 
@@ -3068,7 +3648,7 @@ local function BuildContent()
         FullRefresh()
         RefreshOptions()
     end)
-    c.count = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    c.count = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     c.count:SetPoint("BOTTOMRIGHT", -18, 12)
 
     function c:Resize(width, height)
@@ -3427,9 +4007,11 @@ local function Slash(msg)
         FullRefresh()
         Print("loaded defaults for " .. tostring(class) .. " (" .. #resolved .. " known)")
     elseif cmd == "plates" then
-        db.show.icons.all = not db.show.icons.all
+        local m = db.show.icons
+        local on = not (m.all or m.target or m.focus)
+        m.all, m.target, m.focus = on, on, on
         FullRefresh()
-        Print("spell icons on every nameplate " .. OnOff(db.show.icons.all))
+        Print("spell icons on nameplates " .. OnOff(on))
     elseif cmd == "panel" then
         db.show.icons.panel = not db.show.icons.panel
         FullRefresh()
@@ -3485,7 +4067,7 @@ local function Slash(msg)
         end
         Print(("version %s, %d spells resolved, nameplate icons %s, enemies only %s"):format(
             tostring(C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(ADDON_NAME, "Version")),
-            #resolved, OnOff(db.show.icons.all), OnOff(db.enemyOnly)))
+            #resolved, OnOff(db.show.icons.all or db.show.icons.target or db.show.icons.focus), OnOff(db.enemyOnly)))
         Print("skin: " .. tostring(ns.report.skin or "?") .. ", Dark opacity " .. tostring(db.darkAlpha))
         Print(ns.ShortSlashNote() .. " EllesmereUI nameplates: " .. (ns.euiNameplates and "loaded" or "not loaded")
             .. (ns.euiSeen and ", icons follow its health bar" or ""))
@@ -3539,10 +4121,11 @@ local function Slash(msg)
         end
         if shown == 0 then Print("no target and no nameplates in view") end
     elseif cmd == "aggro" then
-        local on = not (db.show.aggro.all or db.show.aggro.panel)
-        db.show.aggro.all, db.show.aggro.panel = on, on
+        local m = db.show.aggro
+        local on = not (m.all or m.target or m.focus or m.panel)
+        m.all, m.target, m.focus, m.panel = on, on, on, on
         FullRefresh()
-        Print("aggro light on every nameplate and the panel " .. OnOff(on))
+        Print("aggro eye on nameplates and the panel " .. OnOff(on))
     elseif cmd == "style" then
         local Styles = ns.Styles
         if not Styles then return Print("window styles are not loaded") end
@@ -3561,9 +4144,11 @@ local function Slash(msg)
         FullRefresh()
         Print("range text on the target panel " .. OnOff(db.show.distance.panel))
     elseif cmd == "platedistance" then
-        db.show.distance.all = not db.show.distance.all
+        local m = db.show.distance
+        local on = not (m.all or m.target or m.focus)
+        m.all, m.target, m.focus = on, on, on
         FullRefresh()
-        Print("range text on every nameplate " .. OnOff(db.show.distance.all))
+        Print("range text on nameplates " .. OnOff(on))
     elseif cmd == "range" then
         db.showRange = not db.showRange
         FullRefresh()
@@ -3716,6 +4301,28 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
                 distance = distance,
                 aggro = { all = aggroOn, target = false, focus = false, panel = aggroOn },
             }
+        end
+        -- Test builds before 1.19.2 shared one place and bob between the marks (db.mark...):
+        -- each mark gets them back where it has none of its own, and the shared ones go, with
+        -- those builds' Sync choices.
+        if db.markPos ~= nil then
+            for _, which in ipairs({ "target", "focus" }) do
+                local p = which .. "Mark"
+                if db[p .. "Pos"] == nil then
+                    db[p .. "Pos"], db[p .. "X"], db[p .. "Y"] = db.markPos, db.markX, db.markY
+                    db[p .. "Bob"], db[p .. "BobSpeed"], db[p .. "BobDist"] = db.markBob, db.markBobSpeed, db.markBobDist
+                end
+            end
+        end
+        db.markPos, db.markX, db.markY, db.markBob, db.markBobSpeed, db.markBobDist = nil, nil, nil, nil, nil, nil
+        db.markSyncPos, db.markSyncBob = nil, nil
+        -- 1.20.0: All became Others, every nameplate but your target's and your focus's, which go
+        -- by their own columns. Where All was ticked, so are they now, so nothing changes.
+        if not db.showOthers then
+            for _, m in pairs(db.show or {}) do
+                if type(m) == "table" and m.all then m.target, m.focus = true, true end
+            end
+            db.showOthers = true
         end
         CopyDefaults(DEFAULTS, db)
         if not cdb.spells then
