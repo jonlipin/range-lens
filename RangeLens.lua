@@ -1559,18 +1559,35 @@ end
 -- Kept in a block of its own, for the main chunk's 200 locals limit; Marks is its face.
 local Marks = {}
 do
-    -- Target and focus markers: a mark over (or beside) your target's and your
-    -- focus's nameplates, so you can pick them out of a pack. The game draws none
-    -- for the focus. Each has its own art, color, size, side and offsets. The flat
-    -- shapes are plain color (EllesmereUI's flat look); the others are the game's art.
+    -- Target and focus marks: a mark over (or beside) your target's and your focus's
+    -- nameplates, so you can pick them out of a pack. The game draws none for the focus.
+    -- Each has its own shape, color, size, side and offsets. The shapes are Range Lens's own
+    -- textures in Media (drawn by tools/gen-marks.js): smooth at any size, and plain color to
+    -- sit with EllesmereUI's flat look. The skull is the game's raid marker skull.
     local MARK_ARTS = { "arrow", "chevron", "dot", "diamond", "arrowhead", "skull" }
     local MARK_ART_LABEL = {
         arrow = "Flat arrow", chevron = "Flat chevron", dot = "Flat dot", diamond = "Flat diamond",
         arrowhead = "Arrowhead", skull = "Skull",
     }
-    -- The game's art; each points down (toward a plate below it) where it points at all.
-    local MARK_ATLAS = {
-        arrowhead = "housing-floor-arrow-down-2x", skull = "DungeonTargetIndicator",
+    local MEDIA = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Media\\"
+    -- Each shape's texture, drawn pointing down (toward a plate below it); its outline is the
+    -- same file with -Edge. They span 1.2 mark sizes, so the outline fits around the shape.
+    local MARK_TEX = {
+        arrow = "Mark-Arrow", chevron = "Mark-Chevron", dot = "Mark-Dot", diamond = "Mark-Diamond", arrowhead = "Mark-Dart",
+    }
+    local MARK_SKULL = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_8"
+    local MARK_SPAN = 1.2
+    local MARK_EDGE = 0.07 -- the outline's width, in mark sizes (EDGE in gen-marks.js)
+    -- How far each shape reaches from its center, in mark sizes: back (away from the plate)
+    -- and point (toward it). The chevron's inner corner takes another mark's point; round is a
+    -- dot's radius; a blunt mark has no point to put in a corner.
+    local MARK_REACH = {
+        arrow = { back = 0.25, point = 0.25 },
+        chevron = { back = 0.3066, point = 0.3066, corner = -0.0803 },
+        dot = { back = 0.35, point = 0.35, round = 0.35 },
+        diamond = { back = 0.5, point = 0.5 },
+        arrowhead = { back = 0.42, point = 0.48 },
+        skull = { back = 0.45, point = 0.45, blunt = true },
     }
     local MARK_COLORS = { "yellow", "red", "orange", "green", "blue", "purple", "white", "black", "class", "art" }
     local MARK_COLOR_LABEL = {
@@ -1580,6 +1597,7 @@ do
     local MARK_RGB = {
         yellow = { 1, 0.82, 0 }, red = { 1, 0.15, 0.1 }, orange = { 1, 0.5, 0.05 }, green = { 0.25, 1, 0.35 },
         blue = { 0.2, 0.6, 1 }, purple = { 0.7, 0.35, 1 }, white = { 1, 1, 1 }, black = { 0, 0, 0 },
+        beige = { 0.96, 0.89, 0.76 }, -- the arrowhead's own color, after the game's arrowhead art
     }
     local MARK_POSITIONS = { "above", "below", "left", "right" }
     local MARK_POSITION_LABEL = { above = "Above", below = "Below", left = "Left", right = "Right" }
@@ -1624,30 +1642,35 @@ do
         return x, y
     end
 
+    -- The same for a texture, by its texture coordinates.
+    local function TurnTexture(t, pos)
+        if pos == "below" then
+            t:SetTexCoord(0, 1, 1, 0)
+        elseif pos == "left" then -- points right
+            t:SetTexCoord(1, 0, 0, 0, 1, 1, 0, 1)
+        elseif pos == "right" then -- points left
+            t:SetTexCoord(0, 1, 1, 1, 0, 0, 1, 0)
+        else
+            t:SetTexCoord(0, 1, 0, 1)
+        end
+    end
+
     local function MakeMarker(parent)
         local m = CreateFrame("Frame", nil, parent)
         m:SetSize(20, 20)
         m:SetFrameLevel(parent:GetFrameLevel() + 40)
+        m.home = parent -- the plate it belongs on (a focus mark may ride on the target mark)
         -- Everything sits on an inner frame, so bobbing moves it without moving the anchor.
         m.inner = CreateFrame("Frame", nil, m)
         m.inner:SetAllPoints()
         local f = m.inner
-        m.edge = f:CreateTexture(nil, "ARTWORK", nil, 0)   -- black outline of the flat shapes
+        m.edge = f:CreateTexture(nil, "ARTWORK", nil, 0) -- the outline, behind the shape
         m.fill = f:CreateTexture(nil, "ARTWORK", nil, 1)
-        m.art = f:CreateTexture(nil, "ARTWORK", nil, 1)    -- the game's art
-        m.arms, m.edgeArms = {}, {}
-        for i = 1, 2 do
-            m.edgeArms[i] = f:CreateTexture(nil, "ARTWORK", nil, 0)
-            m.arms[i] = f:CreateTexture(nil, "ARTWORK", nil, 1)
-        end
-        m.round = f.CreateMaskTexture and HasAtlas("CircleMaskScalable")
-        if m.round then
-            for _, key in ipairs({ "fill", "edge" }) do
-                local mask = f:CreateMaskTexture()
-                mask:SetAtlas("CircleMaskScalable")
-                mask:SetAllPoints(m[key])
-                m[key .. "Mask"] = mask
-            end
+        for _, t in ipairs({ m.edge, m.fill }) do
+            t:SetPoint("CENTER", f, "CENTER")
+            -- Drawn where it falls rather than snapped to whole pixels: smooth edges, smooth bob.
+            if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
+            if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
         end
         local okGroup, group = pcall(f.CreateAnimationGroup, f)
         if okGroup and group then
@@ -1668,181 +1691,44 @@ do
         return m
     end
 
-    local function ResetShape(t)
-        t:ClearAllPoints()
-        t:SetTexCoord(0, 1, 0, 1)
-        t:SetDesaturated(false)
-        if t.SetVertexOffset then
-            for v = 1, 4 do t:SetVertexOffset(v, 0, 0) end
-        end
-        t:Hide()
-    end
-
-    -- A triangle (arrow) or a diamond from a square texture: its corners pulled in.
-    local function Bend(t, art, pos, w, h)
-        if not t.SetVertexOffset then return end
-        -- Vertices: 1 upper left, 2 lower left, 3 upper right, 4 lower right.
-        if art == "diamond" then
-            t:SetVertexOffset(1, w / 2, 0)
-            t:SetVertexOffset(3, 0, -h / 2)
-            t:SetVertexOffset(2, 0, h / 2)
-            t:SetVertexOffset(4, -w / 2, 0)
-        elseif pos == "below" then
-            t:SetVertexOffset(1, w / 2, 0)
-            t:SetVertexOffset(3, -w / 2, 0)
-        elseif pos == "left" then
-            t:SetVertexOffset(3, 0, -h / 2)
-            t:SetVertexOffset(4, 0, h / 2)
-        elseif pos == "right" then
-            t:SetVertexOffset(1, 0, -h / 2)
-            t:SetVertexOffset(2, 0, h / 2)
-        else
-            t:SetVertexOffset(2, w / 2, 0)
-            t:SetVertexOffset(4, -w / 2, 0)
-        end
-    end
-
-    -- Stretch a texture over four points (going round the shape) about f's center: the box
-    -- around them, then each corner pulled onto its point.
-    local function Quad(t, f, pts)
-        local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
-        for _, p in ipairs(pts) do
-            x0, x1 = math.min(x0, p[1]), math.max(x1, p[1])
-            y0, y1 = math.min(y0, p[2]), math.max(y1, p[2])
-        end
-        t:ClearAllPoints()
-        t:SetPoint("TOPLEFT", f, "CENTER", x0, y1)
-        t:SetPoint("BOTTOMRIGHT", f, "CENTER", x1, y0)
-        -- Vertices: 1 upper left, 3 upper right, 4 lower right, 2 lower left.
-        t:SetVertexOffset(1, pts[1][1] - x0, pts[1][2] - y1)
-        t:SetVertexOffset(3, pts[2][1] - x1, pts[2][2] - y1)
-        t:SetVertexOffset(4, pts[3][1] - x1, pts[3][2] - y0)
-        t:SetVertexOffset(2, pts[4][1] - x0, pts[4][2] - y0)
-    end
-
-    -- A chevron's two arms, pointing down before Turn: each arm's bottom edge runs from its
-    -- end down to the point at (0, low), its top edge thick higher, and both arms meet on
-    -- the same upright edge at x = 0, so the corner is closed.
-    local function ChevronArms(textures, f, pos, reach, slope, low, thick, r, g, b)
-        for i, side in ipairs({ -1, 1 }) do
-            local endY = low + slope * reach
-            local pts = {
-                { side * reach, endY + thick }, { 0, low + thick }, { 0, low }, { side * reach, endY },
-            }
-            for _, p in ipairs(pts) do p[1], p[2] = Turn(pos, p[1], p[2]) end
-            local t = textures[i]
-            t:SetColorTexture(r, g, b, 1)
-            Quad(t, f, pts)
-            t:Show()
-        end
-    end
-
-    -- The game's art, turned to face the plate (texture coordinates, not
-    -- SetRotation, so nothing of the atlas sheet around it shows).
-    local function TurnArt(t, atlas, pos)
-        t:SetAtlas(atlas)
-        if pos == "above" or atlas == MARK_ATLAS.skull then return end
-        local info = C_Texture.GetAtlasInfo(atlas)
-        local l, r = info and info.leftTexCoord, info and info.rightTexCoord
-        local top, b = info and info.topTexCoord, info and info.bottomTexCoord
-        if not (l and r and top and b) then return end
-        if pos == "below" then
-            t:SetTexCoord(l, r, b, top)
-        elseif pos == "left" then -- points right
-            t:SetTexCoord(r, top, l, top, r, b, l, b)
-        else                      -- points left
-            t:SetTexCoord(l, b, r, b, l, top, r, top)
-        end
-    end
-
     -- Draw a mark from its settings. `s` from MarkSettings.
     local function DrawMarker(m, s)
         local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline), s.bobSpeed, s.bobDist }, ":")
         if m.drawn == key then return end
         m.drawn = key
         local size = s.size
-        local cr, cg, cb = MarkColor(s.color == "art" and "white" or s.color)
-        -- A black mark gets a light edge, so it still shows on a dark plate.
-        local er, eg, eb = 0, 0, 0
-        if s.color == "black" then er, eg, eb = 0.85, 0.85, 0.85 end
-        local edge = s.outline and math.max(1, size / 14) or 0
-        ResetShape(m.fill)
-        ResetShape(m.edge)
-        ResetShape(m.art)
-        for i = 1, 2 do
-            ResetShape(m.arms[i])
-            ResetShape(m.edgeArms[i])
-        end
-        if m.masked then
-            m.fill:RemoveMaskTexture(m.fillMask)
-            m.edge:RemoveMaskTexture(m.edgeMask)
-            m.masked = false
-        end
-        local vertical = s.pos == "above" or s.pos == "below"
         m:SetSize(size, size)
-        local f = m.inner
-        if s.art == "arrow" or s.art == "diamond" then
-            local w, h = size, size
-            if s.art == "arrow" then
-                if vertical then h = size * 0.7 else w = size * 0.7 end
-            end
-            m.fill:SetColorTexture(cr, cg, cb, 1)
-            m.fill:SetSize(w, h)
-            m.fill:SetPoint("CENTER", f, "CENTER")
-            Bend(m.fill, s.art, s.pos, w, h)
-            m.fill:Show()
-            if edge > 0 then
-                local ew, eh = w + edge * 3, h + edge * 3
-                m.edge:SetColorTexture(er, eg, eb, 1)
-                m.edge:SetSize(ew, eh)
-                m.edge:SetPoint("CENTER", f, "CENTER")
-                Bend(m.edge, s.art, s.pos, ew, eh)
-                m.edge:Show()
-            end
-        elseif s.art == "dot" then
-            local d = size * 0.7
-            m.fill:SetColorTexture(cr, cg, cb, 1)
-            m.fill:SetSize(d, d)
-            m.fill:SetPoint("CENTER", f, "CENTER")
-            if m.round then
-                m.fill:AddMaskTexture(m.fillMask)
-                m.edge:AddMaskTexture(m.edgeMask)
-                m.masked = true
-            end
-            m.fill:Show()
-            if edge > 0 then
-                m.edge:SetColorTexture(er, eg, eb, 1)
-                m.edge:SetSize(d + edge * 2, d + edge * 2)
-                m.edge:SetPoint("CENTER", f, "CENTER")
-                m.edge:Show()
-            end
-        elseif s.art == "chevron" and m.fill.SetVertexOffset then
-            local half, tall = size / 2, size * 0.3
-            local slope = 2 * tall / half
-            -- The upright thickness that makes an arm about size * 0.16 across.
-            local stretch = math.sqrt(1 + slope * slope)
-            local thick = math.max(2, size * 0.16) * stretch
-            local low = -tall - thick / 2
-            ChevronArms(m.arms, f, s.pos, half, slope, low, thick, cr, cg, cb)
-            if edge > 0 then
-                local grow = edge * stretch
-                ChevronArms(m.edgeArms, f, s.pos, half + edge, slope, low - grow, thick + grow * 2, er, eg, eb)
-            end
+        local fill, edge = m.fill, m.edge
+        if s.art == "skull" then
+            -- The game's raid marker skull (64 texels, with its own smaller levels). It faces
+            -- you from every side, so it does not turn.
+            fill:SetTexture(MARK_SKULL, nil, nil, "TRILINEAR")
+            fill:SetTexCoord(0, 1, 0, 1)
+            fill:SetSize(size, size)
+            fill:SetDesaturated(s.color ~= "art")
+            fill:SetVertexColor(MarkColor(s.color == "art" and "white" or s.color))
+            edge:Hide()
         else
-            local atlas = MARK_ATLAS[s.art]
-            if atlas and HasAtlas(atlas) then
-                TurnArt(m.art, atlas, s.pos)
-                m.art:SetSize(size, size)
-                m.art:SetPoint("CENTER", f, "CENTER")
-                if s.color == "art" then
-                    m.art:SetVertexColor(1, 1, 1)
-                else
-                    m.art:SetDesaturated(true)
-                    m.art:SetVertexColor(cr, cg, cb)
-                end
-                m.art:Show()
+            local file = MEDIA .. MARK_TEX[s.art]
+            local span = size * MARK_SPAN
+            fill:SetTexture(file, nil, nil, "TRILINEAR")
+            fill:SetDesaturated(false)
+            fill:SetSize(span, span)
+            TurnTexture(fill, s.pos)
+            local own = s.art == "arrowhead" and "beige" or "white"
+            fill:SetVertexColor(MarkColor(s.color == "art" and own or s.color))
+            if s.outline then
+                edge:SetTexture(file .. "-Edge", nil, nil, "TRILINEAR")
+                edge:SetSize(span, span)
+                TurnTexture(edge, s.pos)
+                -- A black mark gets a light edge, so it still shows on a dark plate.
+                if s.color == "black" then edge:SetVertexColor(0.85, 0.85, 0.85) else edge:SetVertexColor(0, 0, 0) end
+                edge:Show()
+            else
+                edge:Hide()
             end
         end
+        fill:Show()
         if m.bobMove then
             -- Speed 5 takes half a second each way; 1 takes 2.5 seconds, 10 a quarter.
             local dx, dy = Turn(s.pos, 0, -s.bobDist)
@@ -1857,11 +1743,40 @@ do
         end
     end
 
-    -- Put a mark beside `anchor` (a health bar). `stack` moves it further out, for
-    -- a focus mark on the same plate and side as the target mark.
-    local function PlaceMarker(m, anchor, s, stack)
+    -- How far out from the target mark's center a focus mark on it sits, in pixels: just beyond
+    -- it, 2 pixels between their outlines; or, on a chevron, with its point in the chevron's
+    -- corner and its sides parallel to the chevron's arms (the corner is 90 degrees, a diamond's).
+    local function StackDistance(t, fo)
+        local rt, rf = MARK_REACH[t.art], MARK_REACH[fo.art]
+        local et = (t.outline and t.art ~= "skull") and MARK_EDGE * t.size or 0
+        local ef = (fo.outline and fo.art ~= "skull") and MARK_EDGE * fo.size or 0
+        local clear = 2 + et + ef
+        if rt.corner and not rf.blunt then
+            -- The corner's sides are at 45 degrees, so a gap across them is sqrt 2 deep.
+            local corner = rt.corner * t.size
+            if rf.round then return corner + (rf.round * fo.size + clear) * math.sqrt(2) end
+            return corner + clear * math.sqrt(2) + rf.point * fo.size
+        end
+        return rt.back * t.size + clear + rf.point * fo.size
+    end
+
+    local function Bob(m, on)
+        if not m.bob then return end
+        if on then
+            if not m.bob:IsPlaying() then m.bob:Play() end
+        elseif m.bob:IsPlaying() then
+            m.bob:Stop()
+        end
+    end
+
+    -- Put a mark beside `anchor` (a health bar) on its own plate.
+    local function PlaceMarker(m, anchor, s)
         DrawMarker(m, s)
-        local gap = MARK_GAP[s.pos] + (stack or 0)
+        if m:GetParent() ~= m.home then
+            m:SetParent(m.home)
+            m:SetFrameLevel(m.home:GetFrameLevel() + 40)
+        end
+        local gap = MARK_GAP[s.pos]
         m:ClearAllPoints()
         if s.pos == "below" then
             m:SetPoint("TOP", anchor, "BOTTOM", s.x, -gap + s.y)
@@ -1873,17 +1788,25 @@ do
             m:SetPoint("BOTTOM", anchor, "TOP", s.x, gap + s.y)
         end
         m:Show()
-        if m.bob then
-            if s.bob then
-                if not m.bob:IsPlaying() then m.bob:Play() end
-            elseif m.bob:IsPlaying() then
-                m.bob:Stop()
-            end
-        end
+        Bob(m, s.bob)
+    end
+
+    -- Put the focus mark on the target mark: a child of its moving part, so the pair moves
+    -- together with the target mark's bob, and placed by StackDistance (its own offsets and
+    -- bob are for when it is on a plate of its own).
+    local function RideMarker(m, target, t, s)
+        DrawMarker(m, s)
+        if m:GetParent() ~= target.inner then m:SetParent(target.inner) end
+        m:SetFrameLevel(target.inner:GetFrameLevel() + 1)
+        local dx, dy = Turn(s.pos, 0, StackDistance(t, s))
+        m:ClearAllPoints()
+        m:SetPoint("CENTER", target, "CENTER", dx, dy)
+        m:Show()
+        Bob(m, false)
     end
 
     local function HideMarker(m)
-        if m.bob and m.bob:IsPlaying() then m.bob:Stop() end
+        Bob(m, false)
         m:Hide()
     end
 
@@ -1891,12 +1814,13 @@ do
     local function ShowMarkerPair(marks, targetAnchor, focusAnchor)
         local t, fo = MarkSettings("target"), MarkSettings("focus")
         if t.on and targetAnchor then PlaceMarker(marks.target, targetAnchor, t) else HideMarker(marks.target) end
-        if fo.on and focusAnchor then
-            local stack
-            if t.on and focusAnchor == targetAnchor and fo.pos == t.pos then stack = t.size + 2 end
-            PlaceMarker(marks.focus, focusAnchor, fo, stack)
-        else
+        if not (fo.on and focusAnchor) then
             HideMarker(marks.focus)
+        elseif t.on and focusAnchor == targetAnchor and fo.pos == t.pos then
+            -- Your target is your focus, and both marks are on the same side.
+            RideMarker(marks.focus, marks.target, t, fo)
+        else
+            PlaceMarker(marks.focus, focusAnchor, fo)
         end
     end
 
@@ -1916,13 +1840,9 @@ do
         local anchors = {}
         for _, token in ipairs({ "target", "focus" }) do
             local plate = db[token .. "Mark"] and MarkerPlate(token)
-            local m = plateMarks[token]
             if plate then
                 -- On the plate, so it hides, fades and scales with it.
-                if m:GetParent() ~= plate then
-                    m:SetParent(plate)
-                    m:SetFrameLevel(plate:GetFrameLevel() + 40)
-                end
+                plateMarks[token].home = plate
                 anchors[token] = PlateAnchor(plate)
             end
         end
@@ -1934,13 +1854,15 @@ do
         if not plateMarks then return end
         local plate = C_NamePlate.GetNamePlateForUnit(unit)
         for _, m in pairs(plateMarks) do
-            if plate and m:GetParent() == plate then HideMarker(m) end
+            if plate and m.home == plate then HideMarker(m) end
         end
     end
 
     Marks.ARTS, Marks.ART_LABEL, Marks.COLORS, Marks.COLOR_LABEL = MARK_ARTS, MARK_ART_LABEL, MARK_COLORS, MARK_COLOR_LABEL
     Marks.POSITIONS, Marks.POSITION_LABEL = MARK_POSITIONS, MARK_POSITION_LABEL
     Marks.Make, Marks.ShowPair, Marks.Update, Marks.PlateRemoved = MakeMarker, ShowMarkerPair, UpdateMarkers, MarkersPlateRemoved
+    Marks.StackDistance = StackDistance -- for the tests
+    ns.Marks = Marks
 end
 
 local function RefreshAllPlates()
@@ -2577,7 +2499,7 @@ local function BuildContent()
         Check("Outline", p .. "Outline", Redraw)
     end
     MarkControls("target", "Target mark", "Mark my target", "A mark on your target's nameplate, so you can pick it out of a pack.")
-    MarkControls("focus", "Focus mark", "Mark my focus", "A mark on your focus's nameplate; the game draws none for your focus. On the same side as the target mark, it sits further out when your target is also your focus.")
+    MarkControls("focus", "Focus mark", "Mark my focus", "A mark on your focus's nameplate; the game draws none for your focus. When your target is also your focus and both marks are on the same side, the focus mark sits just beyond the target mark and moves with it; on a chevron, its point sits in the chevron's corner.")
 
     -- Window style (Styles.lua). This page itself keeps the game's look in every style.
     Heading("Look")
