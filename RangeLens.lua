@@ -419,8 +419,10 @@ local DEFAULTS = {
     -- Marks over your target's and your focus's nameplates (see MarkSettings).
     targetMark = false, targetMarkArt = "arrow", targetMarkColor = "yellow", targetMarkPos = "above",
     targetMarkSize = 20, targetMarkX = 0, targetMarkY = 0, targetMarkBob = true, targetMarkOutline = true,
+    targetMarkBobSpeed = 5, targetMarkBobDist = 4, -- bob speed 1 (slow) to 10, distance in pixels
     focusMark = false, focusMarkArt = "diamond", focusMarkColor = "purple", focusMarkPos = "above",
     focusMarkSize = 16, focusMarkX = 0, focusMarkY = 0, focusMarkBob = false, focusMarkOutline = true,
+    focusMarkBobSpeed = 5, focusMarkBobDist = 4,
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
     show = {
@@ -1608,6 +1610,8 @@ do
             x = db[p .. "X"] or 0,
             y = db[p .. "Y"] or 0,
             bob = db[p .. "Bob"] and true or false,
+            bobSpeed = db[p .. "BobSpeed"] or 5,
+            bobDist = db[p .. "BobDist"] or 4,
             outline = db[p .. "Outline"] ~= false,
         }
     end
@@ -1631,12 +1635,10 @@ do
         m.edge = f:CreateTexture(nil, "ARTWORK", nil, 0)   -- black outline of the flat shapes
         m.fill = f:CreateTexture(nil, "ARTWORK", nil, 1)
         m.art = f:CreateTexture(nil, "ARTWORK", nil, 1)    -- the game's art
-        m.lines, m.edgeLines = {}, {}
+        m.arms, m.edgeArms = {}, {}
         for i = 1, 2 do
-            if f.CreateLine then
-                m.edgeLines[i] = f:CreateLine(nil, "ARTWORK", nil, 0)
-                m.lines[i] = f:CreateLine(nil, "ARTWORK", nil, 1)
-            end
+            m.edgeArms[i] = f:CreateTexture(nil, "ARTWORK", nil, 0)
+            m.arms[i] = f:CreateTexture(nil, "ARTWORK", nil, 1)
         end
         m.round = f.CreateMaskTexture and HasAtlas("CircleMaskScalable")
         if m.round then
@@ -1649,11 +1651,18 @@ do
         end
         local okGroup, group = pcall(f.CreateAnimationGroup, f)
         if okGroup and group then
-            group:SetLooping("BOUNCE")
+            -- In toward the bar, then back out, repeated. BOUNCE looping drew a frame at the
+            -- start as it turned round at the bar (a flicker); this loop ends where it starts.
+            group:SetLooping("REPEAT")
             local move = group:CreateAnimation("Translation")
             move:SetDuration(0.5)
+            move:SetOrder(1)
             if move.SetSmoothing then move:SetSmoothing("IN_OUT") end
-            m.bob, m.bobMove = group, move
+            local back = group:CreateAnimation("Translation")
+            back:SetDuration(0.5)
+            back:SetOrder(2)
+            if back.SetSmoothing then back:SetSmoothing("IN_OUT") end
+            m.bob, m.bobMove, m.bobBack = group, move, back
         end
         m:Hide()
         return m
@@ -1693,6 +1702,41 @@ do
         end
     end
 
+    -- Stretch a texture over four points (going round the shape) about f's center: the box
+    -- around them, then each corner pulled onto its point.
+    local function Quad(t, f, pts)
+        local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+        for _, p in ipairs(pts) do
+            x0, x1 = math.min(x0, p[1]), math.max(x1, p[1])
+            y0, y1 = math.min(y0, p[2]), math.max(y1, p[2])
+        end
+        t:ClearAllPoints()
+        t:SetPoint("TOPLEFT", f, "CENTER", x0, y1)
+        t:SetPoint("BOTTOMRIGHT", f, "CENTER", x1, y0)
+        -- Vertices: 1 upper left, 3 upper right, 4 lower right, 2 lower left.
+        t:SetVertexOffset(1, pts[1][1] - x0, pts[1][2] - y1)
+        t:SetVertexOffset(3, pts[2][1] - x1, pts[2][2] - y1)
+        t:SetVertexOffset(4, pts[3][1] - x1, pts[3][2] - y0)
+        t:SetVertexOffset(2, pts[4][1] - x0, pts[4][2] - y0)
+    end
+
+    -- A chevron's two arms, pointing down before Turn: each arm's bottom edge runs from its
+    -- end down to the point at (0, low), its top edge thick higher, and both arms meet on
+    -- the same upright edge at x = 0, so the corner is closed.
+    local function ChevronArms(textures, f, pos, reach, slope, low, thick, r, g, b)
+        for i, side in ipairs({ -1, 1 }) do
+            local endY = low + slope * reach
+            local pts = {
+                { side * reach, endY + thick }, { 0, low + thick }, { 0, low }, { side * reach, endY },
+            }
+            for _, p in ipairs(pts) do p[1], p[2] = Turn(pos, p[1], p[2]) end
+            local t = textures[i]
+            t:SetColorTexture(r, g, b, 1)
+            Quad(t, f, pts)
+            t:Show()
+        end
+    end
+
     -- The game's art, turned to face the plate (texture coordinates, not
     -- SetRotation, so nothing of the atlas sheet around it shows).
     local function TurnArt(t, atlas, pos)
@@ -1713,7 +1757,7 @@ do
 
     -- Draw a mark from its settings. `s` from MarkSettings.
     local function DrawMarker(m, s)
-        local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline) }, ":")
+        local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline), s.bobSpeed, s.bobDist }, ":")
         if m.drawn == key then return end
         m.drawn = key
         local size = s.size
@@ -1726,7 +1770,8 @@ do
         ResetShape(m.edge)
         ResetShape(m.art)
         for i = 1, 2 do
-            if m.lines[i] then m.lines[i]:Hide() m.edgeLines[i]:Hide() end
+            ResetShape(m.arms[i])
+            ResetShape(m.edgeArms[i])
         end
         if m.masked then
             m.fill:RemoveMaskTexture(m.fillMask)
@@ -1771,29 +1816,17 @@ do
                 m.edge:SetPoint("CENTER", f, "CENTER")
                 m.edge:Show()
             end
-        elseif s.art == "chevron" then
+        elseif s.art == "chevron" and m.fill.SetVertexOffset then
             local half, tall = size / 2, size * 0.3
-            local thick = math.max(2, size * 0.16)
-            local ax, ay = Turn(s.pos, 0, -tall)      -- the point
-            local lx, ly = Turn(s.pos, -half, tall)
-            local rx, ry = Turn(s.pos, half, tall)
-            local ends = { { lx, ly }, { rx, ry } }
-            for i = 1, 2 do
-                local line, under = m.lines[i], m.edgeLines[i]
-                if line then
-                    line:SetColorTexture(cr, cg, cb, 1)
-                    line:SetThickness(thick)
-                    line:SetStartPoint("CENTER", f, ends[i][1], ends[i][2])
-                    line:SetEndPoint("CENTER", f, ax, ay)
-                    line:Show()
-                    if edge > 0 then
-                        under:SetColorTexture(er, eg, eb, 1)
-                        under:SetThickness(thick + edge * 2)
-                        under:SetStartPoint("CENTER", f, ends[i][1], ends[i][2])
-                        under:SetEndPoint("CENTER", f, ax, ay)
-                        under:Show()
-                    end
-                end
+            local slope = 2 * tall / half
+            -- The upright thickness that makes an arm about size * 0.16 across.
+            local stretch = math.sqrt(1 + slope * slope)
+            local thick = math.max(2, size * 0.16) * stretch
+            local low = -tall - thick / 2
+            ChevronArms(m.arms, f, s.pos, half, slope, low, thick, cr, cg, cb)
+            if edge > 0 then
+                local grow = edge * stretch
+                ChevronArms(m.edgeArms, f, s.pos, half + edge, slope, low - grow, thick + grow * 2, er, eg, eb)
             end
         else
             local atlas = MARK_ATLAS[s.art]
@@ -1811,8 +1844,16 @@ do
             end
         end
         if m.bobMove then
-            local dx, dy = Turn(s.pos, 0, -math.max(2, size * 0.2))
+            -- Speed 5 takes half a second each way; 1 takes 2.5 seconds, 10 a quarter.
+            local dx, dy = Turn(s.pos, 0, -s.bobDist)
+            local each = 2.5 / math.max(1, s.bobSpeed)
+            local playing = m.bob:IsPlaying()
+            if playing then m.bob:Stop() end
             m.bobMove:SetOffset(dx, dy)
+            m.bobBack:SetOffset(-dx, -dy)
+            m.bobMove:SetDuration(each)
+            m.bobBack:SetDuration(each)
+            if playing then m.bob:Play() end
         end
     end
 
@@ -2338,11 +2379,44 @@ local function BuildContent()
     local col = left
 
     local y = -2
-    local function Heading(text)
+    local headings = 0
+    local function Heading(text, help)
+        headings = headings + 1
+        if headings > 1 then
+            -- A thin rule over every group but the first, so it is clear where one ends.
+            local rule = col:CreateTexture(nil, "ARTWORK")
+            rule:SetColorTexture(1, 0.82, 0, 0.3)
+            rule:SetHeight(1)
+            rule:SetWidth(LEFT_W - 50)
+            rule:SetPoint("TOPLEFT", 14, y - 1)
+            y = y - 6
+        end
         local h = col:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h:SetPoint("TOPLEFT", 14, y - 4)
         h:SetText(text)
+        if help then
+            -- The group's explanation, on hover, instead of a block of text.
+            local q = CreateFrame("Button", nil, col)
+            q:SetSize(22, 16)
+            q:SetPoint("LEFT", h, "RIGHT", 2, 0)
+            local qt = q:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            qt:SetPoint("CENTER")
+            qt:SetText("(?)")
+            q:SetScript("OnEnter", function(self)
+                qt:SetTextColor(1, 0.82, 0)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(text, 1, 1, 1)
+                GameTooltip:AddLine(help, nil, nil, nil, true)
+                GameTooltip:Show()
+            end)
+            q:SetScript("OnLeave", function()
+                qt:SetTextColor(1, 1, 1)
+                GameTooltip:Hide()
+            end)
+            h.help = q
+        end
         y = y - 26
+        return h
     end
     local function Check(label, key, after)
         local cb = OptionCheck(col, label, key, 16, y, after)
@@ -2423,19 +2497,6 @@ local function BuildContent()
         return { cap = cap, button = b }
     end
 
-    Heading("Aggro eye")
-    local aggroNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    aggroNote:SetPoint("TOPLEFT", 20, y)
-    aggroNote:SetWidth(LEFT_W - 60)
-    aggroNote:SetJustifyH("LEFT")
-    aggroNote:SetText("Turn it on in Where to show. The dungeon finder eye on red mobs: searching, on a yellow glow, within the warning distance of their aggro range; fixed on you, on a pulsing red glow, inside it. An estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
-    y = y - 66
-    Slider("Warn yards early", "aggroWarnYards", 0, 15)
-    Slider("Aggro eye size", "aggroSize", 10, 40)
-    Cycle("Eye glow", "eyeGlowMode", { "always", "inside", "off" }, { always = "Always", inside = "Only in range", off = "Off" })
-    Slider("Eye left / right", "eyeOffsetX", -60, 60)
-    Slider("Eye up / down", "eyeOffsetY", -40, 40)
-
     -- The range: shown as numbers or as a light. Where it sits and how big it is apply to
     -- both, so they stay; the light's own settings and the numbers' own settings each sit in a
     -- block that is hidden for the other way, and everything below closes up (Reflow).
@@ -2490,18 +2551,20 @@ local function BuildContent()
     Slider("Nameplate up / down", "plateOffsetY", -100, 100)
     Slider("Nameplate left / right", "plateOffsetX", -200, 200)
 
+    Heading("Aggro eye", "Turn it on in Where to show. The dungeon finder eye on red mobs: searching, on a yellow glow, within the warning distance of their aggro range; fixed on you, on a pulsing red glow, inside it.\n\nAn estimate, out of stealth only: about 20 yards at your level, 1 less per level you are above the mob and 1 more per level below (5 to 45).")
+    Slider("Warn yards early", "aggroWarnYards", 0, 15)
+    Slider("Aggro eye size", "aggroSize", 10, 40)
+    Cycle("Eye glow", "eyeGlowMode", { "always", "inside", "off" }, { always = "Always", inside = "Only in range", off = "Off" })
+    Slider("Eye left / right", "eyeOffsetX", -60, 60)
+    Slider("Eye up / down", "eyeOffsetY", -40, 40)
+
     -- Marks over the target's and the focus's nameplates, each set on its own.
-    Heading("Target and focus marks")
-    local markNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    markNote:SetPoint("TOPLEFT", 20, y)
-    markNote:SetWidth(LEFT_W - 60)
-    markNote:SetJustifyH("LEFT")
-    markNote:SetText("A mark on your target's and your focus's nameplates. The flat shapes are plain color, to sit with EllesmereUI's flat look. A black mark gets a light edge.")
-    y = y - 42
-    local function MarkControls(which, title)
+    local MARK_HELP = " The flat shapes are plain color, to sit with EllesmereUI's flat look. A black mark gets a light edge so it shows on a dark nameplate."
+    local function MarkControls(which, title, show, help)
         local p = which .. "Mark"
         local function Redraw() Marks.Update() end
-        Check(title, p, Redraw)
+        Heading(title, help .. MARK_HELP)
+        Check(show, p, Redraw)
         Cycle("Mark", p .. "Art", Marks.ARTS, Marks.ART_LABEL)
         Cycle("Color", p .. "Color", Marks.COLORS, Marks.COLOR_LABEL)
         Cycle("Side", p .. "Pos", Marks.POSITIONS, Marks.POSITION_LABEL)
@@ -2509,11 +2572,12 @@ local function BuildContent()
         Slider("Left / right", p .. "X", -100, 100)
         Slider("Up / down", p .. "Y", -100, 100)
         Check("Bob", p .. "Bob", Redraw)
+        Slider("Bob speed", p .. "BobSpeed", 1, 10)
+        Slider("Bob distance", p .. "BobDist", 1, 30)
         Check("Outline", p .. "Outline", Redraw)
-        y = y - 6
     end
-    MarkControls("target", "Mark my target")
-    MarkControls("focus", "Mark my focus")
+    MarkControls("target", "Target mark", "Mark my target", "A mark on your target's nameplate, so you can pick it out of a pack.")
+    MarkControls("focus", "Focus mark", "Mark my focus", "A mark on your focus's nameplate; the game draws none for your focus. On the same side as the target mark, it sits further out when your target is also your focus.")
 
     -- Window style (Styles.lua). This page itself keeps the game's look in every style.
     Heading("Look")

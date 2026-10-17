@@ -1,11 +1,8 @@
-## 1.18.0 - 2026-10-16
+## 1.19.0 - 2026-10-17
 
-- Target and focus marks: a new Target and focus marks section in the options puts a mark on your target's nameplate, your focus's, or both, so you can pick them out of a pack. The game draws no mark for your focus. Both are off until you turn them on.
-- Each mark has its own settings:
-  - Mark: a flat arrow, chevron, dot or diamond drawn in plain color (to sit with EllesmereUI's flat look), or Blizzard's arrowhead or dungeon skull.
-  - Color: yellow, red, orange, green, blue, purple, white, black (with a light edge so it shows on a dark plate), your class color, or the art's own colors.
-  - Side: above, below, left or right of the health bar; arrows turn to point at the bar.
-  - Size, Left / right and Up / down sliders, a Bob option that moves the mark toward the bar and back, and a black Outline for the flat shapes.
-- When your target is also your focus and both marks are on the same side, the focus mark sits further out so they don't overlap.
-- The marks show in the nameplate preview, and work on Blizzard and EllesmereUI nameplates.
-- New commands: `/rangelens mark` and `/rangelens focusmark` turn the marks on or off.
+- Bob speed and Bob distance: each mark's bob now has its own speed (1 to 10) and distance (1 to 30 pixels) sliders under its Bob option.
+- The target and focus marks are separate groups in the options, Target mark and Focus mark, each with its own heading.
+- A thin line now sits above each group in the options, so it is clear where one group ends and the next begins.
+- The Aggro eye settings moved below Size and position. Their explanation is now a tooltip: hover the (?) next to the heading. The Target mark and Focus mark headings have one too.
+- Fixed: the bob on the target and focus marks flickered for a frame at its closest point to the health bar. It now moves in and back out smoothly.
+- Fixed: the flat chevron's two arms did not meet at the corner. They now join in a closed point, outline included.
