@@ -416,6 +416,11 @@ local DEFAULTS = {
     eyeOffsetX = 0,             -- the aggro eye's position, from just left of the health bar
     eyeOffsetY = 0,
     lightGlow = true,           -- the soft halo around the range light
+    -- Marks over your target's and your focus's nameplates (see MarkSettings).
+    targetMark = false, targetMarkArt = "arrow", targetMarkColor = "yellow", targetMarkPos = "above",
+    targetMarkSize = 20, targetMarkX = 0, targetMarkY = 0, targetMarkBob = true, targetMarkOutline = true,
+    focusMark = false, focusMarkArt = "diamond", focusMarkColor = "purple", focusMarkPos = "above",
+    focusMarkSize = 16, focusMarkX = 0, focusMarkY = 0, focusMarkBob = false, focusMarkOutline = true,
     -- Where each part shows, set in the options' grid: every enemy nameplate,
     -- your target's, your focus's, and the target panel.
     show = {
@@ -1549,6 +1554,354 @@ local function OnPlateRemoved(unit)
     end
 end
 
+-- Kept in a block of its own, for the main chunk's 200 locals limit; Marks is its face.
+local Marks = {}
+do
+    -- Target and focus markers: a mark over (or beside) your target's and your
+    -- focus's nameplates, so you can pick them out of a pack. The game draws none
+    -- for the focus. Each has its own art, color, size, side and offsets. The flat
+    -- shapes are plain color (EllesmereUI's flat look); the others are the game's art.
+    local MARK_ARTS = { "arrow", "chevron", "dot", "diamond", "arrowhead", "skull" }
+    local MARK_ART_LABEL = {
+        arrow = "Flat arrow", chevron = "Flat chevron", dot = "Flat dot", diamond = "Flat diamond",
+        arrowhead = "Arrowhead", skull = "Skull",
+    }
+    -- The game's art; each points down (toward a plate below it) where it points at all.
+    local MARK_ATLAS = {
+        arrowhead = "housing-floor-arrow-down-2x", skull = "DungeonTargetIndicator",
+    }
+    local MARK_COLORS = { "yellow", "red", "orange", "green", "blue", "purple", "white", "black", "class", "art" }
+    local MARK_COLOR_LABEL = {
+        yellow = "Yellow", red = "Red", orange = "Orange", green = "Green", blue = "Blue", purple = "Purple",
+        white = "White", black = "Black", class = "Class color", art = "Art's own",
+    }
+    local MARK_RGB = {
+        yellow = { 1, 0.82, 0 }, red = { 1, 0.15, 0.1 }, orange = { 1, 0.5, 0.05 }, green = { 0.25, 1, 0.35 },
+        blue = { 0.2, 0.6, 1 }, purple = { 0.7, 0.35, 1 }, white = { 1, 1, 1 }, black = { 0, 0, 0 },
+    }
+    local MARK_POSITIONS = { "above", "below", "left", "right" }
+    local MARK_POSITION_LABEL = { above = "Above", below = "Below", left = "Left", right = "Right" }
+    -- Space between the mark and the health bar on each side; above clears the name.
+    local MARK_GAP = { above = 16, below = 4, left = 6, right = 6 }
+
+    local function MarkColor(name)
+        if name == "class" then
+            local _, class = UnitClass("player")
+            local c = class and ((C_ClassColor and C_ClassColor.GetClassColor and C_ClassColor.GetClassColor(class))
+                or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]))
+            if c then return c.r, c.g, c.b end
+            return 1, 1, 1
+        end
+        local c = MARK_RGB[name] or MARK_RGB.white
+        return c[1], c[2], c[3]
+    end
+
+    -- A mark's settings, from db.<which>Mark... ("target" or "focus").
+    local function MarkSettings(which)
+        local p = which .. "Mark"
+        return {
+            on = db[p] and true or false,
+            art = MARK_ART_LABEL[db[p .. "Art"]] and db[p .. "Art"] or "arrow",
+            color = db[p .. "Color"] or "yellow",
+            pos = MARK_POSITION_LABEL[db[p .. "Pos"]] and db[p .. "Pos"] or "above",
+            size = db[p .. "Size"] or 20,
+            x = db[p .. "X"] or 0,
+            y = db[p .. "Y"] or 0,
+            bob = db[p .. "Bob"] and true or false,
+            outline = db[p .. "Outline"] ~= false,
+        }
+    end
+
+    -- Shapes are laid out pointing down; this turns a point to face the plate from `pos`.
+    local function Turn(pos, x, y)
+        if pos == "below" then return x, -y end
+        if pos == "left" then return -y, x end   -- points right
+        if pos == "right" then return y, -x end  -- points left
+        return x, y
+    end
+
+    local function MakeMarker(parent)
+        local m = CreateFrame("Frame", nil, parent)
+        m:SetSize(20, 20)
+        m:SetFrameLevel(parent:GetFrameLevel() + 40)
+        -- Everything sits on an inner frame, so bobbing moves it without moving the anchor.
+        m.inner = CreateFrame("Frame", nil, m)
+        m.inner:SetAllPoints()
+        local f = m.inner
+        m.edge = f:CreateTexture(nil, "ARTWORK", nil, 0)   -- black outline of the flat shapes
+        m.fill = f:CreateTexture(nil, "ARTWORK", nil, 1)
+        m.art = f:CreateTexture(nil, "ARTWORK", nil, 1)    -- the game's art
+        m.lines, m.edgeLines = {}, {}
+        for i = 1, 2 do
+            if f.CreateLine then
+                m.edgeLines[i] = f:CreateLine(nil, "ARTWORK", nil, 0)
+                m.lines[i] = f:CreateLine(nil, "ARTWORK", nil, 1)
+            end
+        end
+        m.round = f.CreateMaskTexture and HasAtlas("CircleMaskScalable")
+        if m.round then
+            for _, key in ipairs({ "fill", "edge" }) do
+                local mask = f:CreateMaskTexture()
+                mask:SetAtlas("CircleMaskScalable")
+                mask:SetAllPoints(m[key])
+                m[key .. "Mask"] = mask
+            end
+        end
+        local okGroup, group = pcall(f.CreateAnimationGroup, f)
+        if okGroup and group then
+            group:SetLooping("BOUNCE")
+            local move = group:CreateAnimation("Translation")
+            move:SetDuration(0.5)
+            if move.SetSmoothing then move:SetSmoothing("IN_OUT") end
+            m.bob, m.bobMove = group, move
+        end
+        m:Hide()
+        return m
+    end
+
+    local function ResetShape(t)
+        t:ClearAllPoints()
+        t:SetTexCoord(0, 1, 0, 1)
+        t:SetDesaturated(false)
+        if t.SetVertexOffset then
+            for v = 1, 4 do t:SetVertexOffset(v, 0, 0) end
+        end
+        t:Hide()
+    end
+
+    -- A triangle (arrow) or a diamond from a square texture: its corners pulled in.
+    local function Bend(t, art, pos, w, h)
+        if not t.SetVertexOffset then return end
+        -- Vertices: 1 upper left, 2 lower left, 3 upper right, 4 lower right.
+        if art == "diamond" then
+            t:SetVertexOffset(1, w / 2, 0)
+            t:SetVertexOffset(3, 0, -h / 2)
+            t:SetVertexOffset(2, 0, h / 2)
+            t:SetVertexOffset(4, -w / 2, 0)
+        elseif pos == "below" then
+            t:SetVertexOffset(1, w / 2, 0)
+            t:SetVertexOffset(3, -w / 2, 0)
+        elseif pos == "left" then
+            t:SetVertexOffset(3, 0, -h / 2)
+            t:SetVertexOffset(4, 0, h / 2)
+        elseif pos == "right" then
+            t:SetVertexOffset(1, 0, -h / 2)
+            t:SetVertexOffset(2, 0, h / 2)
+        else
+            t:SetVertexOffset(2, w / 2, 0)
+            t:SetVertexOffset(4, -w / 2, 0)
+        end
+    end
+
+    -- The game's art, turned to face the plate (texture coordinates, not
+    -- SetRotation, so nothing of the atlas sheet around it shows).
+    local function TurnArt(t, atlas, pos)
+        t:SetAtlas(atlas)
+        if pos == "above" or atlas == MARK_ATLAS.skull then return end
+        local info = C_Texture.GetAtlasInfo(atlas)
+        local l, r = info and info.leftTexCoord, info and info.rightTexCoord
+        local top, b = info and info.topTexCoord, info and info.bottomTexCoord
+        if not (l and r and top and b) then return end
+        if pos == "below" then
+            t:SetTexCoord(l, r, b, top)
+        elseif pos == "left" then -- points right
+            t:SetTexCoord(r, top, l, top, r, b, l, b)
+        else                      -- points left
+            t:SetTexCoord(l, b, r, b, l, top, r, top)
+        end
+    end
+
+    -- Draw a mark from its settings. `s` from MarkSettings.
+    local function DrawMarker(m, s)
+        local key = table.concat({ s.art, s.color, s.pos, s.size, tostring(s.outline) }, ":")
+        if m.drawn == key then return end
+        m.drawn = key
+        local size = s.size
+        local cr, cg, cb = MarkColor(s.color == "art" and "white" or s.color)
+        -- A black mark gets a light edge, so it still shows on a dark plate.
+        local er, eg, eb = 0, 0, 0
+        if s.color == "black" then er, eg, eb = 0.85, 0.85, 0.85 end
+        local edge = s.outline and math.max(1, size / 14) or 0
+        ResetShape(m.fill)
+        ResetShape(m.edge)
+        ResetShape(m.art)
+        for i = 1, 2 do
+            if m.lines[i] then m.lines[i]:Hide() m.edgeLines[i]:Hide() end
+        end
+        if m.masked then
+            m.fill:RemoveMaskTexture(m.fillMask)
+            m.edge:RemoveMaskTexture(m.edgeMask)
+            m.masked = false
+        end
+        local vertical = s.pos == "above" or s.pos == "below"
+        m:SetSize(size, size)
+        local f = m.inner
+        if s.art == "arrow" or s.art == "diamond" then
+            local w, h = size, size
+            if s.art == "arrow" then
+                if vertical then h = size * 0.7 else w = size * 0.7 end
+            end
+            m.fill:SetColorTexture(cr, cg, cb, 1)
+            m.fill:SetSize(w, h)
+            m.fill:SetPoint("CENTER", f, "CENTER")
+            Bend(m.fill, s.art, s.pos, w, h)
+            m.fill:Show()
+            if edge > 0 then
+                local ew, eh = w + edge * 3, h + edge * 3
+                m.edge:SetColorTexture(er, eg, eb, 1)
+                m.edge:SetSize(ew, eh)
+                m.edge:SetPoint("CENTER", f, "CENTER")
+                Bend(m.edge, s.art, s.pos, ew, eh)
+                m.edge:Show()
+            end
+        elseif s.art == "dot" then
+            local d = size * 0.7
+            m.fill:SetColorTexture(cr, cg, cb, 1)
+            m.fill:SetSize(d, d)
+            m.fill:SetPoint("CENTER", f, "CENTER")
+            if m.round then
+                m.fill:AddMaskTexture(m.fillMask)
+                m.edge:AddMaskTexture(m.edgeMask)
+                m.masked = true
+            end
+            m.fill:Show()
+            if edge > 0 then
+                m.edge:SetColorTexture(er, eg, eb, 1)
+                m.edge:SetSize(d + edge * 2, d + edge * 2)
+                m.edge:SetPoint("CENTER", f, "CENTER")
+                m.edge:Show()
+            end
+        elseif s.art == "chevron" then
+            local half, tall = size / 2, size * 0.3
+            local thick = math.max(2, size * 0.16)
+            local ax, ay = Turn(s.pos, 0, -tall)      -- the point
+            local lx, ly = Turn(s.pos, -half, tall)
+            local rx, ry = Turn(s.pos, half, tall)
+            local ends = { { lx, ly }, { rx, ry } }
+            for i = 1, 2 do
+                local line, under = m.lines[i], m.edgeLines[i]
+                if line then
+                    line:SetColorTexture(cr, cg, cb, 1)
+                    line:SetThickness(thick)
+                    line:SetStartPoint("CENTER", f, ends[i][1], ends[i][2])
+                    line:SetEndPoint("CENTER", f, ax, ay)
+                    line:Show()
+                    if edge > 0 then
+                        under:SetColorTexture(er, eg, eb, 1)
+                        under:SetThickness(thick + edge * 2)
+                        under:SetStartPoint("CENTER", f, ends[i][1], ends[i][2])
+                        under:SetEndPoint("CENTER", f, ax, ay)
+                        under:Show()
+                    end
+                end
+            end
+        else
+            local atlas = MARK_ATLAS[s.art]
+            if atlas and HasAtlas(atlas) then
+                TurnArt(m.art, atlas, s.pos)
+                m.art:SetSize(size, size)
+                m.art:SetPoint("CENTER", f, "CENTER")
+                if s.color == "art" then
+                    m.art:SetVertexColor(1, 1, 1)
+                else
+                    m.art:SetDesaturated(true)
+                    m.art:SetVertexColor(cr, cg, cb)
+                end
+                m.art:Show()
+            end
+        end
+        if m.bobMove then
+            local dx, dy = Turn(s.pos, 0, -math.max(2, size * 0.2))
+            m.bobMove:SetOffset(dx, dy)
+        end
+    end
+
+    -- Put a mark beside `anchor` (a health bar). `stack` moves it further out, for
+    -- a focus mark on the same plate and side as the target mark.
+    local function PlaceMarker(m, anchor, s, stack)
+        DrawMarker(m, s)
+        local gap = MARK_GAP[s.pos] + (stack or 0)
+        m:ClearAllPoints()
+        if s.pos == "below" then
+            m:SetPoint("TOP", anchor, "BOTTOM", s.x, -gap + s.y)
+        elseif s.pos == "left" then
+            m:SetPoint("RIGHT", anchor, "LEFT", -gap + s.x, s.y)
+        elseif s.pos == "right" then
+            m:SetPoint("LEFT", anchor, "RIGHT", gap + s.x, s.y)
+        else
+            m:SetPoint("BOTTOM", anchor, "TOP", s.x, gap + s.y)
+        end
+        m:Show()
+        if m.bob then
+            if s.bob then
+                if not m.bob:IsPlaying() then m.bob:Play() end
+            elseif m.bob:IsPlaying() then
+                m.bob:Stop()
+            end
+        end
+    end
+
+    local function HideMarker(m)
+        if m.bob and m.bob:IsPlaying() then m.bob:Stop() end
+        m:Hide()
+    end
+
+    -- Show both marks on a pair of mark frames for these plates (anchor per mark).
+    local function ShowMarkerPair(marks, targetAnchor, focusAnchor)
+        local t, fo = MarkSettings("target"), MarkSettings("focus")
+        if t.on and targetAnchor then PlaceMarker(marks.target, targetAnchor, t) else HideMarker(marks.target) end
+        if fo.on and focusAnchor then
+            local stack
+            if t.on and focusAnchor == targetAnchor and fo.pos == t.pos then stack = t.size + 2 end
+            PlaceMarker(marks.focus, focusAnchor, fo, stack)
+        else
+            HideMarker(marks.focus)
+        end
+    end
+
+    local plateMarks -- the in-game pair, made on first use
+
+    local function MarkerPlate(token)
+        local ok, plate = pcall(C_NamePlate.GetNamePlateForUnit, token)
+        if ok and plate and not plate:IsForbidden() then return plate end
+    end
+
+    local function UpdateMarkers()
+        if not db then return end
+        if not plateMarks then
+            if not (db.targetMark or db.focusMark) then return end
+            plateMarks = { target = MakeMarker(UIParent), focus = MakeMarker(UIParent) }
+        end
+        local anchors = {}
+        for _, token in ipairs({ "target", "focus" }) do
+            local plate = db[token .. "Mark"] and MarkerPlate(token)
+            local m = plateMarks[token]
+            if plate then
+                -- On the plate, so it hides, fades and scales with it.
+                if m:GetParent() ~= plate then
+                    m:SetParent(plate)
+                    m:SetFrameLevel(plate:GetFrameLevel() + 40)
+                end
+                anchors[token] = PlateAnchor(plate)
+            end
+        end
+        ShowMarkerPair(plateMarks, anchors.target, anchors.focus)
+    end
+
+    -- A plate going away may come back for another mob: take the marks off it.
+    local function MarkersPlateRemoved(unit)
+        if not plateMarks then return end
+        local plate = C_NamePlate.GetNamePlateForUnit(unit)
+        for _, m in pairs(plateMarks) do
+            if plate and m:GetParent() == plate then HideMarker(m) end
+        end
+    end
+
+    Marks.ARTS, Marks.ART_LABEL, Marks.COLORS, Marks.COLOR_LABEL = MARK_ARTS, MARK_ART_LABEL, MARK_COLORS, MARK_COLOR_LABEL
+    Marks.POSITIONS, Marks.POSITION_LABEL = MARK_POSITIONS, MARK_POSITION_LABEL
+    Marks.Make, Marks.ShowPair, Marks.Update, Marks.PlateRemoved = MakeMarker, ShowMarkerPair, UpdateMarkers, MarkersPlateRemoved
+end
+
 local function RefreshAllPlates()
     for unit, row in pairs(activePlates) do
         row:Hide()
@@ -1563,6 +1916,7 @@ local function RefreshAllPlates()
     for unit in pairs(plateUnits) do
         OnPlateAdded(unit)
     end
+    Marks.Update()
 end
 
 ---------------------------------------------------------------------------
@@ -2136,6 +2490,31 @@ local function BuildContent()
     Slider("Nameplate up / down", "plateOffsetY", -100, 100)
     Slider("Nameplate left / right", "plateOffsetX", -200, 200)
 
+    -- Marks over the target's and the focus's nameplates, each set on its own.
+    Heading("Target and focus marks")
+    local markNote = col:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    markNote:SetPoint("TOPLEFT", 20, y)
+    markNote:SetWidth(LEFT_W - 60)
+    markNote:SetJustifyH("LEFT")
+    markNote:SetText("A mark on your target's and your focus's nameplates. The flat shapes are plain color, to sit with EllesmereUI's flat look. A black mark gets a light edge.")
+    y = y - 42
+    local function MarkControls(which, title)
+        local p = which .. "Mark"
+        local function Redraw() Marks.Update() end
+        Check(title, p, Redraw)
+        Cycle("Mark", p .. "Art", Marks.ARTS, Marks.ART_LABEL)
+        Cycle("Color", p .. "Color", Marks.COLORS, Marks.COLOR_LABEL)
+        Cycle("Side", p .. "Pos", Marks.POSITIONS, Marks.POSITION_LABEL)
+        Slider("Size", p .. "Size", 8, 64)
+        Slider("Left / right", p .. "X", -100, 100)
+        Slider("Up / down", p .. "Y", -100, 100)
+        Check("Bob", p .. "Bob", Redraw)
+        Check("Outline", p .. "Outline", Redraw)
+        y = y - 6
+    end
+    MarkControls("target", "Mark my target")
+    MarkControls("focus", "Mark my focus")
+
     -- Window style (Styles.lua). This page itself keeps the game's look in every style.
     Heading("Look")
     local Styles = ns.Styles
@@ -2286,6 +2665,7 @@ local function BuildContent()
     prow.rangeLight = MakeLight(prow)
     prow.distance = prow:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     prow.distance:SetPoint("LEFT", prow, "RIGHT", 4, 0)
+    local pmarks = { target = Marks.Make(plate), focus = Marks.Make(plate) } -- as if this mob were both
     local previewEmpty = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     previewEmpty:SetPoint("TOP", mockBorder, "BOTTOM", 0, -10)
 
@@ -2450,6 +2830,7 @@ local function BuildContent()
         end
         AnchorEye(prow.aggro, mockBar)
         ShowAggroMark(prow.aggro, ShowOnAnyPlate("aggro") and "near" or nil)
+        Marks.ShowPair(pmarks, mockBar, mockBar)
         if ShowOnAnyPlate("distance") then
             ShowDistance(prow.distance, prow.rangeLight, prow, FormatDistance(10, 15), 10, 15)
         else
@@ -2997,6 +3378,7 @@ local HELP = {
     "/rangelens enemy - toggle enemies-only on nameplates",
     "/rangelens targetonly | /rangelens focusonly - limit nameplate icons to your target, your focus, or both",
     "/rangelens melee - toggle hiding nameplate icons in melee range",
+    "/rangelens mark | /rangelens focusmark - toggle the mark on your target's or your focus's nameplate",
     "/rangelens cooldowns - toggle cooldown swipes",
     "/rangelens inrange - show only the spells that can reach (no red icons)",
     "/rangelens reach <spell> <yards> - set a spell's reach by hand; /rangelens reach <spell> sets it back to automatic",
@@ -3066,6 +3448,12 @@ local function Slash(msg)
         db.show.icons.panel = not db.show.icons.panel
         FullRefresh()
         Print("spell icons on the target panel " .. OnOff(db.show.icons.panel))
+    elseif cmd == "mark" or cmd == "focusmark" then
+        local key = (cmd == "mark") and "targetMark" or "focusMark"
+        db[key] = not db[key]
+        Marks.Update()
+        RefreshOptions()
+        Print(((cmd == "mark") and "the mark on your target's" or "the mark on your focus's") .. " nameplate " .. OnOff(db[key]))
     elseif cmd == "targetonly" then
         db.show.icons.target = not db.show.icons.target
         FullRefresh()
@@ -3374,9 +3762,11 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         plateUnits[arg1] = true
         OnPlateAdded(arg1)
+        Marks.Update()
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
         plateUnits[arg1] = nil
         OnPlateRemoved(arg1)
+        Marks.PlateRemoved(arg1)
     elseif event == "PLAYER_TARGET_CHANGED" then
         RefreshAllPlates()
         UpdatePanel()

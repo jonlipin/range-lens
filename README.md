@@ -19,6 +19,7 @@ Made for WoW Forever (Interface 16001).
 - **Spells that hit around you too.** Frost Nova, Thunder Clap, Arcane Explosion, Psychic Scream, Consecration, Cone of Cold and the other area spells have no target range, so the game can't check them. Range Lens knows each one's radius from the game's own spell data and checks it with the nearest distance check that never lights early. Frost Nova starts 1 yard short, for its freeze, Arctic Reach is counted, and any of them can be unlocked and tuned.
 - **Talents count.** Whether an icon is lit comes straight from the game's own range check, so range talents are always included.
 - **Aggro warning.** An optional dungeon finder eye on red mobs: searching as you near their estimated aggro range, fixed on you inside it (out of stealth; an estimate from levels, since the game keeps the real range to itself).
+- **Mark your target and focus.** An optional mark on your target's and your focus's nameplates: a flat arrow, chevron, dot or diamond, or Blizzard's arrowhead or skull, in the color (black too), size, side and place you choose, with an optional bob and outline.
 - **Your look.** The Look section in the options picks the window style: Automatic, Blizzard or Dark, with an opacity slider for Dark. The range icons follow it, rounded like the Cooldown Manager in Blizzard and square in Dark and EllesmereUI.
 - **Works with EllesmereUI.** The icons sit on EllesmereUI's nameplates, and the nameplate preview is drawn from its nameplate settings.
 - **Per character.** Each character keeps its own spells, panel position and settings.
@@ -45,6 +46,7 @@ Download it from CurseForge, or copy this repository into `_classic_beta_/Interf
 | `/rangelens list`, `/rangelens clear`, `/rangelens defaults` | Show, empty, or reset the list to your class's starting spells |
 | `/rangelens plates`, `/rangelens panel`, `/rangelens enemy` | Toggle spell icons on every nameplate, on the target panel, enemies only |
 | `/rangelens targetonly`, `/rangelens focusonly` | Toggle spell icons on your target's, your focus's nameplate |
+| `/rangelens mark`, `/rangelens focusmark` | Toggle the mark on your target's, your focus's nameplate |
 | `/rangelens melee` | Toggle hiding nameplate icons in melee range |
 | `/rangelens cooldowns`, `/rangelens range` | Toggle the cooldown sweep, the range number on icons |
 | `/rangelens inrange` | Toggle showing only the spells that can reach |
